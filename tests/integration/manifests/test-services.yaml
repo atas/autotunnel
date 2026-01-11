@@ -142,14 +142,16 @@ spec:
     spec:
       initContainers:
         - name: generate-certs
-          image: alpine/openssl:latest
-          command: ["/bin/sh", "-c"]
-          args:
+          image: alpine:latest
+          command:
+            - /bin/sh
+            - -c
             - |
-              openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                -keyout /ssl/tls.key -out /ssl/tls.crt \
-                -subj "/CN=nginx-tls.test" \
-                -addext "subjectAltName=DNS:nginx-tls.test,DNS:localhost"
+              apk add --no-cache openssl &&
+              printf '[req]\ndistinguished_name=dn\nx509_extensions=v3\nprompt=no\n[dn]\nCN=nginx-tls.test\n[v3]\nsubjectAltName=DNS:nginx-tls.test,DNS:localhost\n' > /tmp/ssl.cnf &&
+              openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /ssl/tls.key -out /ssl/tls.crt -config /tmp/ssl.cnf &&
+              chmod 644 /ssl/tls.crt && chmod 600 /ssl/tls.key &&
+              ls -la /ssl/
           volumeMounts:
             - name: ssl-certs
               mountPath: /ssl
@@ -166,9 +168,10 @@ spec:
               subPath: nginx.conf
           readinessProbe:
             exec:
-              command: ["wget", "--no-check-certificate", "-qO/dev/null", "https://localhost/health"]
-            initialDelaySeconds: 5
+              command: ["sh", "-c", "wget --no-check-certificate -qO/dev/null https://localhost/health || wget --no-check-certificate -qO/dev/null https://localhost:443/health"]
+            initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 5
       volumes:
         - name: ssl-certs
           emptyDir: {}
