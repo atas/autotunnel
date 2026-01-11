@@ -36,6 +36,9 @@ archives:
         - src: contrib/lazyfwd.service
           dst: .
           strip_parent: true
+        - src: contrib/lazyfwd.plist
+          dst: .
+          strip_parent: true
 
 checksum:
    name_template: "checksums.txt"
