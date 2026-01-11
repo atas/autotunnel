@@ -66,19 +66,8 @@ func main() {
 		}
 
 		fmt.Printf("\nCreated: %s\n", configPath)
-		fmt.Println("\nNext steps:")
-		fmt.Println("  1. Edit the config file to add your Kubernetes services")
-		fmt.Println("  2. Run 'lazyfwd' again to start the proxy")
-		fmt.Println("\nExample service configuration:")
-		fmt.Println("  http:")
-		fmt.Println("    k8s:")
-		fmt.Println("      services:")
-		fmt.Println("        grafana.localhost:")
-		fmt.Println("          context: my-cluster")
-		fmt.Println("          namespace: monitoring")
-		fmt.Println("          service: grafana")
-		fmt.Println("          port: 3000")
-		return
+		fmt.Println("\nServer starting with no routes configured.")
+		fmt.Println("Edit the config file to add routes - changes will be auto-reloaded.")
 	}
 
 	// Load configuration

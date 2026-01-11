@@ -208,27 +208,6 @@ http:
 	}
 }
 
-func TestValidate_MissingRoutes(t *testing.T) {
-	cfg := &Config{
-		ApiVersion: CurrentApiVersion,
-		HTTP: HTTPConfig{
-			ListenAddr:  ":8989",
-			IdleTimeout: 60 * time.Minute,
-			K8s: K8sConfig{
-				Routes: map[string]K8sRouteConfig{},
-			},
-		},
-	}
-
-	err := cfg.Validate()
-	if err == nil {
-		t.Error("expected error for missing routes")
-	}
-	if !strings.Contains(err.Error(), "at least one route") {
-		t.Errorf("expected error about missing routes, got: %v", err)
-	}
-}
-
 func TestValidate_InvalidPort(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
