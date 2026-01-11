@@ -1,6 +1,7 @@
 package internal
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,13 +45,11 @@ type K8sRouteConfig struct {
 	Scheme    string `yaml:"scheme"` // "http" or "https" - controls X-Forwarded-Proto header (default: http)
 }
 
-// DefaultConfig returns configuration with sensible defaults
+// DefaultConfig returns configuration with sensible defaults for optional fields
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
 		HTTP: HTTPConfig{
-			ListenAddr:  ":8989",
-			IdleTimeout: 60 * time.Minute,
 			K8s: K8sConfig{
 				Kubeconfig: filepath.Join(home, ".kube", "config"),
 				Routes:     make(map[string]K8sRouteConfig),
@@ -72,6 +71,14 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Validate required fields
+	if cfg.HTTP.ListenAddr == "" {
+		return nil, fmt.Errorf("missing required field: http.listen")
+	}
+	if cfg.HTTP.IdleTimeout == 0 {
+		return nil, fmt.Errorf("missing required field: http.idle_timeout")
+	}
+
 	// Expand home directory in kubeconfig path
 	if len(cfg.HTTP.K8s.Kubeconfig) > 0 && cfg.HTTP.K8s.Kubeconfig[0] == '~' {
 		home, _ := os.UserHomeDir()
@@ -82,50 +89,9 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 // DefaultConfigTemplate is the template for a new config file
-const DefaultConfigTemplate = `apiVersion: lazyfwd/v1
-
-# Verbose logging (can also use --verbose flag with higher priority)
-# verbose: false
-
-# Auto-reload on file changes. Any changes need ` + "`brew services restart lazyfwd`" + ` while it is false.
-auto_reload_config: true
-
-http:
-  # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
-  listen: ":8989"  # Port changes require: brew services restart lazyfwd
-
-  # Idle timeout before closing tunnels (Go duration format)
-  # After this duration of no traffic, the tunnel will be closed
-  idle_timeout: 60m
-
-  k8s:
-    # Path to kubeconfig (optional, defaults to ~/.kube/config)
-    # kubeconfig: ~/.kube/config
-
-    routes:
-      # # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)
-      # argocd.localhost:
-      #   context: my-cluster-context # Kubernetes context name from kubeconfig
-      #   namespace: argocd           # Kubernetes namespace
-      #   service: argocd-server      # Kubernetes service name
-      #   port: 443                   # Service port (automatically resolves to container targetPort)
-      #   scheme: https               # Set X-Forwarded-Proto header (use "https" to prevent HTTPS redirects)
-
-      # # http://grafana.localhost:8989
-      # grafana.localhost:
-      #   context: my-cluster-context
-      #   namespace: monitoring
-      #   service: grafana
-      #   port: 3000
-      #   scheme: http               # Default is "http", no need to specify
-
-      # http://debug.localhost:8989
-      # debug.localhost:
-      #   context: microk8s
-      #   namespace: default
-      #   pod: my-debug-pod         # Pod name (use instead of service)
-      #   port: 8080
-`
+//
+//go:embed default_config.yaml
+var DefaultConfigTemplate string
 
 // CreateDefaultConfig creates a new config file with example content
 func CreateDefaultConfig(path string) error {
