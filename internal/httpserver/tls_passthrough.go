@@ -1,102 +1,16 @@
-package internal
+package httpserver
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"net/http"
-	"net/http/httputil"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/atas/lazyfwd/internal/config"
 )
 
-// Server handles both HTTP and TLS passthrough on a single port
-type Server struct {
-	config   *config.Config
-	manager  *Manager
-	listener *MuxListener
-	server   *http.Server
-	done     chan struct{}
-}
-
-// NewServer creates a new unified server
-func NewServer(cfg *config.Config, manager *Manager) *Server {
-	s := &Server{
-		config:  cfg,
-		manager: manager,
-		done:    make(chan struct{}),
-	}
-	return s
-}
-
-// Start begins listening and handling connections
-func (s *Server) Start() error {
-	mux, err := NewMuxListener(s.config.HTTP.ListenAddr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", s.config.HTTP.ListenAddr, err)
-	}
-	s.listener = mux
-
-	// Create HTTP server using the HTTP-only listener
-	s.server = &http.Server{
-		Handler:      s,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-
-	// Start HTTP server in goroutine
-	go func() {
-		err := s.server.Serve(mux.HTTPListener())
-		// Ignore expected errors during shutdown
-		if err != nil && err != http.ErrServerClosed && !strings.Contains(err.Error(), "use of closed network connection") {
-			log.Printf("HTTP server error: %v", err)
-		}
-	}()
-
-	log.Printf("Server listening on %s (HTTP + TLS passthrough)", s.config.HTTP.ListenAddr)
-
-	// Accept loop - route connections based on protocol
-	for {
-		conn, err := mux.Listener.Accept()
-		if err != nil {
-			select {
-			case <-s.done:
-				return nil
-			default:
-				log.Printf("Accept error: %v", err)
-				continue
-			}
-		}
-
-		go s.handleConnection(conn)
-	}
-}
-
-func (s *Server) handleConnection(conn net.Conn) {
-	peekConn := NewPeekConn(conn)
-
-	if peekConn.IsTLS() {
-		// Handle as TLS passthrough
-		s.handleTLSConnection(peekConn)
-	} else {
-		// Pass to HTTP server
-		select {
-		case s.listener.httpConns <- peekConn:
-		case <-s.done:
-			conn.Close()
-		}
-	}
-}
-
-func (s *Server) handleTLSConnection(conn *PeekConn) {
+func (s *Server) handleTLSConnection(conn *peekConn) {
 	defer conn.Close()
 
 	// Set deadline for reading ClientHello
@@ -182,85 +96,6 @@ func (s *Server) handleTLSConnection(conn *PeekConn) {
 	}()
 
 	wg.Wait()
-}
-
-// ServeHTTP implements http.Handler for HTTP requests
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	host := r.Host
-	if idx := strings.LastIndex(host, ":"); idx != -1 {
-		host = host[:idx]
-	}
-
-	if s.config.Verbose {
-		log.Printf("[http] [%s] %s %s", host, r.Method, r.URL.Path)
-	}
-
-	tunnel, err := s.manager.GetOrCreateTunnel(host)
-	if err != nil {
-		log.Printf("[http] [%s] Error: %v", host, err)
-		http.Error(w, fmt.Sprintf("No service configured for host: %s", host), http.StatusBadGateway)
-		return
-	}
-
-	if !tunnel.IsRunning() {
-		if err := tunnel.Start(r.Context()); err != nil {
-			log.Printf("[http] [%s] Failed to start tunnel: %v", host, err)
-			http.Error(w, fmt.Sprintf("Failed to start tunnel: %v", err), http.StatusBadGateway)
-			return
-		}
-	}
-
-	tunnel.Touch()
-
-	scheme := tunnel.Scheme()
-	targetURL := &url.URL{
-		Scheme: scheme,
-		Host:   fmt.Sprintf("127.0.0.1:%d", tunnel.LocalPort()),
-	}
-
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-
-	if scheme == "https" {
-		proxy.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	}
-
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = r.Host
-		req.Header.Set("X-Forwarded-Proto", scheme)
-		req.Header.Set("X-Forwarded-Host", r.Host)
-		if r.RemoteAddr != "" {
-			req.Header.Set("X-Forwarded-For", strings.Split(r.RemoteAddr, ":")[0])
-		}
-	}
-
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		// Don't log client disconnections - they're normal
-		if err == context.Canceled || strings.Contains(err.Error(), "context canceled") {
-			return
-		}
-		log.Printf("[http] [%s] Proxy error: %v", host, err)
-	}
-
-	proxy.ServeHTTP(w, r)
-}
-
-// Shutdown gracefully stops the server
-func (s *Server) Shutdown(ctx context.Context) error {
-	// 1. Signal accept loop to stop
-	close(s.done)
-	// 2. Close listener - this unblocks both the main Accept() and HTTPListener.Accept()
-	if s.listener != nil {
-		s.listener.Close()
-	}
-	// 3. Force close HTTP server (don't wait for connections)
-	if s.server != nil {
-		s.server.Close()
-	}
-	return nil
 }
 
 // extractSNI parses the TLS ClientHello and extracts the SNI extension

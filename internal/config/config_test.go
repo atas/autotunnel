@@ -319,3 +319,304 @@ func TestValidate_BothServiceAndPod(t *testing.T) {
 		t.Errorf("expected error about mutual exclusivity, got: %v", err)
 	}
 }
+
+func TestValidate_EmptyListenAddr(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  "", // Empty - should fail
+			IdleTimeout: 60 * time.Minute,
+			K8s: K8sConfig{
+				Routes: map[string]K8sRouteConfig{
+					"test.localhost": {
+						Context:   "test",
+						Namespace: "default",
+						Service:   "test-svc",
+						Port:      8080,
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for empty listen address")
+	}
+	if !strings.Contains(err.Error(), "http.listen is required") {
+		t.Errorf("expected error about listen address, got: %v", err)
+	}
+}
+
+func TestValidate_InvalidIdleTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{"zero timeout", 0},
+		{"negative timeout", -1 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				ApiVersion: CurrentApiVersion,
+				HTTP: HTTPConfig{
+					ListenAddr:  ":8989",
+					IdleTimeout: tt.timeout,
+					K8s: K8sConfig{
+						Routes: map[string]K8sRouteConfig{
+							"test.localhost": {
+								Context:   "test",
+								Namespace: "default",
+								Service:   "test-svc",
+								Port:      8080,
+							},
+						},
+					},
+				},
+			}
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Error("expected error for invalid idle timeout")
+			}
+			if !strings.Contains(err.Error(), "idle_timeout must be positive") {
+				t.Errorf("expected error about idle timeout, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidate_EmptyContext(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+			K8s: K8sConfig{
+				Routes: map[string]K8sRouteConfig{
+					"test.localhost": {
+						Context:   "", // Empty - should fail
+						Namespace: "default",
+						Service:   "test-svc",
+						Port:      8080,
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for empty context")
+	}
+	if !strings.Contains(err.Error(), "context is required") {
+		t.Errorf("expected error about context, got: %v", err)
+	}
+}
+
+func TestValidate_EmptyNamespace(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+			K8s: K8sConfig{
+				Routes: map[string]K8sRouteConfig{
+					"test.localhost": {
+						Context:   "test",
+						Namespace: "", // Empty - should fail
+						Service:   "test-svc",
+						Port:      8080,
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for empty namespace")
+	}
+	if !strings.Contains(err.Error(), "namespace is required") {
+		t.Errorf("expected error about namespace, got: %v", err)
+	}
+}
+
+func TestValidate_PortTooHigh(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+			K8s: K8sConfig{
+				Routes: map[string]K8sRouteConfig{
+					"test.localhost": {
+						Context:   "test",
+						Namespace: "default",
+						Service:   "test-svc",
+						Port:      65536, // Too high - should fail
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for port too high")
+	}
+	if !strings.Contains(err.Error(), "port must be between") {
+		t.Errorf("expected error about port, got: %v", err)
+	}
+}
+
+func TestLoadConfig_FileNotFound(t *testing.T) {
+	_, err := LoadConfig("/nonexistent/path/config.yaml")
+	if err == nil {
+		t.Error("expected error for non-existent file")
+	}
+	if !strings.Contains(err.Error(), "failed to read config file") {
+		t.Errorf("expected error about reading file, got: %v", err)
+	}
+}
+
+func TestLoadConfig_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Write invalid YAML
+	if err := os.WriteFile(configPath, []byte("{{{invalid yaml"), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Error("expected error for invalid YAML")
+	}
+	if !strings.Contains(err.Error(), "failed to parse config file") {
+		t.Errorf("expected error about parsing, got: %v", err)
+	}
+}
+
+func TestLoadConfig_ValidationFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Write valid YAML but invalid config (missing listen)
+	configContent := `apiVersion: lazyfwd/v1
+http:
+  idle_timeout: 30m
+  k8s:
+    routes:
+      test.localhost:
+        context: test
+        namespace: default
+        service: test-svc
+        port: 80
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_, err := LoadConfig(configPath)
+	if err == nil {
+		t.Error("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "http.listen is required") {
+		t.Errorf("expected validation error, got: %v", err)
+	}
+}
+
+func TestConfigExists(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Test with existing file
+	existingPath := filepath.Join(tmpDir, "exists.yaml")
+	if err := os.WriteFile(existingPath, []byte("test"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	if !ConfigExists(existingPath) {
+		t.Error("expected ConfigExists to return true for existing file")
+	}
+
+	// Test with non-existing file
+	nonExistingPath := filepath.Join(tmpDir, "does-not-exist.yaml")
+	if ConfigExists(nonExistingPath) {
+		t.Error("expected ConfigExists to return false for non-existing file")
+	}
+}
+
+func TestShouldAutoReload(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    *bool
+		expected bool
+	}{
+		{"nil defaults to true", nil, true},
+		{"explicit true", boolPtr(true), true},
+		{"explicit false", boolPtr(false), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{AutoReloadConfig: tt.value}
+			if got := cfg.ShouldAutoReload(); got != tt.expected {
+				t.Errorf("ShouldAutoReload() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// Verify kubeconfig defaults to ~/.kube/config
+	home, _ := os.UserHomeDir()
+	expectedKubeconfig := filepath.Join(home, ".kube", "config")
+	if cfg.HTTP.K8s.Kubeconfig != expectedKubeconfig {
+		t.Errorf("expected kubeconfig %q, got %q", expectedKubeconfig, cfg.HTTP.K8s.Kubeconfig)
+	}
+
+	// Verify Routes map is initialized (not nil)
+	if cfg.HTTP.K8s.Routes == nil {
+		t.Error("expected Routes map to be initialized, got nil")
+	}
+}
+
+func TestCreateDefaultConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "new-config.yaml")
+
+	err := CreateDefaultConfig(configPath)
+	if err != nil {
+		t.Fatalf("CreateDefaultConfig failed: %v", err)
+	}
+
+	// Verify file exists
+	if !ConfigExists(configPath) {
+		t.Error("expected config file to be created")
+	}
+
+	// Verify file has content
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read created config: %v", err)
+	}
+	if len(content) == 0 {
+		t.Error("expected config file to have content")
+	}
+
+	// Verify it contains expected markers
+	if !strings.Contains(string(content), "apiVersion") {
+		t.Error("expected config to contain 'apiVersion'")
+	}
+	if !strings.Contains(string(content), "lazyfwd/v1") {
+		t.Error("expected config to contain 'lazyfwd/v1'")
+	}
+}

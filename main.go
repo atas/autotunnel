@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/atas/lazyfwd/internal"
 	"github.com/atas/lazyfwd/internal/config"
+	"github.com/atas/lazyfwd/internal/httpserver"
+	"github.com/atas/lazyfwd/internal/tunnelmgr"
+	"github.com/atas/lazyfwd/internal/watcher"
 )
 
 var (
@@ -88,17 +90,17 @@ https://github.com/atas/lazyfwd`)
 	cfg.LogRoutes()
 
 	// Create manager and server
-	manager := internal.NewManager(cfg)
-	server := internal.NewServer(cfg, manager)
+	manager := tunnelmgr.NewManager(cfg)
+	server := httpserver.NewServer(cfg, manager)
 
 	// Start manager
 	manager.Start()
 
 	// Start config watcher if auto-reload is enabled
-	var configWatcher *internal.ConfigWatcher
+	var configWatcher *watcher.ConfigWatcher
 	if cfg.ShouldAutoReload() {
 		var err error
-		configWatcher, err = internal.NewConfigWatcher(configPath, cfg, manager, verbose)
+		configWatcher, err = watcher.NewConfigWatcher(configPath, cfg, manager, verbose)
 		if err != nil {
 			log.Printf("Warning: Failed to start config watcher: %v", err)
 		} else {
@@ -123,7 +125,11 @@ https://github.com/atas/lazyfwd`)
 	sig := <-sigChan
 	log.Printf("Received signal %v, shutting down...", sig)
 
-	// Graceful shutdown with timeout
+	gracefulShutdown(server, manager, configWatcher)
+}
+
+// gracefulShutdown performs orderly shutdown of all components
+func gracefulShutdown(server *httpserver.Server, manager *tunnelmgr.Manager, configWatcher *watcher.ConfigWatcher) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

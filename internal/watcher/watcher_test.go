@@ -1,13 +1,32 @@
-package internal
+package watcher
 
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/atas/lazyfwd/internal/config"
 )
+
+// mockConfigUpdater implements ConfigUpdater for testing
+type mockConfigUpdater struct {
+	mu     sync.RWMutex
+	config *config.Config
+}
+
+func (m *mockConfigUpdater) UpdateConfig(newConfig *config.Config) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config = newConfig
+}
+
+func (m *mockConfigUpdater) getConfig() *config.Config {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config
+}
 
 // TestConfigWatcher_DetectsFileChanges verifies the watcher detects config file changes
 func TestConfigWatcher_DetectsFileChanges(t *testing.T) {
@@ -39,10 +58,7 @@ http:
 	}
 
 	// Create a mock manager that tracks UpdateConfig calls
-	manager := &Manager{
-		config:  cfg,
-		tunnels: make(map[string]*Tunnel),
-	}
+	manager := &mockConfigUpdater{config: cfg}
 
 	// Create watcher
 	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
@@ -77,10 +93,9 @@ http:
 	time.Sleep(800 * time.Millisecond)
 
 	// Verify manager has updated routes
-	manager.mu.RLock()
-	_, hasUpdatedRoute := manager.config.HTTP.K8s.Routes["updated.localhost"]
-	_, hasOldRoute := manager.config.HTTP.K8s.Routes["test.localhost"]
-	manager.mu.RUnlock()
+	currentCfg := manager.getConfig()
+	_, hasUpdatedRoute := currentCfg.HTTP.K8s.Routes["updated.localhost"]
+	_, hasOldRoute := currentCfg.HTTP.K8s.Routes["test.localhost"]
 
 	if !hasUpdatedRoute {
 		t.Error("Expected manager config to have 'updated.localhost' route after reload")
@@ -118,10 +133,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &Manager{
-		config:  cfg,
-		tunnels: make(map[string]*Tunnel),
-	}
+	manager := &mockConfigUpdater{config: cfg}
 
 	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
@@ -160,10 +172,9 @@ http:
 	time.Sleep(1000 * time.Millisecond)
 
 	// Verify updated route
-	manager.mu.RLock()
-	_, hasAtomicRoute := manager.config.HTTP.K8s.Routes["atomic.localhost"]
-	_, hasInitialRoute := manager.config.HTTP.K8s.Routes["initial.localhost"]
-	manager.mu.RUnlock()
+	currentCfg := manager.getConfig()
+	_, hasAtomicRoute := currentCfg.HTTP.K8s.Routes["atomic.localhost"]
+	_, hasInitialRoute := currentCfg.HTTP.K8s.Routes["initial.localhost"]
 
 	if !hasAtomicRoute {
 		t.Error("Expected manager config to have 'atomic.localhost' route after atomic rename")
@@ -201,10 +212,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &Manager{
-		config:  cfg,
-		tunnels: make(map[string]*Tunnel),
-	}
+	manager := &mockConfigUpdater{config: cfg}
 
 	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
@@ -235,10 +243,9 @@ http:
 	time.Sleep(800 * time.Millisecond)
 
 	// Original config should be preserved
-	manager.mu.RLock()
-	_, hasValidRoute := manager.config.HTTP.K8s.Routes["valid.localhost"]
-	_, hasBrokenRoute := manager.config.HTTP.K8s.Routes["broken.localhost"]
-	manager.mu.RUnlock()
+	currentCfg := manager.getConfig()
+	_, hasValidRoute := currentCfg.HTTP.K8s.Routes["valid.localhost"]
+	_, hasBrokenRoute := currentCfg.HTTP.K8s.Routes["broken.localhost"]
 
 	if !hasValidRoute {
 		t.Error("Expected original 'valid.localhost' route to be preserved after invalid config")
@@ -275,10 +282,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &Manager{
-		config:  cfg,
-		tunnels: make(map[string]*Tunnel),
-	}
+	manager := &mockConfigUpdater{config: cfg}
 
 	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
@@ -300,5 +304,81 @@ http:
 		// Success - stopped cleanly
 	case <-time.After(2 * time.Second):
 		t.Error("Watcher.Stop() timed out - possible deadlock")
+	}
+}
+
+// TestConfigWatcher_PreservesCliVerbose verifies that CLI --verbose flag is preserved across reloads
+func TestConfigWatcher_PreservesCliVerbose(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "test-config.yaml")
+
+	// Write config WITHOUT verbose flag (defaults to false)
+	initialConfig := `apiVersion: lazyfwd/v1
+http:
+  listen: ":8989"
+  idle_timeout: 60m
+  k8s:
+    routes:
+      test.localhost:
+        context: test
+        namespace: default
+        service: test
+        port: 80
+`
+	if err := os.WriteFile(configPath, []byte(initialConfig), 0644); err != nil {
+		t.Fatalf("Failed to write initial config: %v", err)
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Simulate CLI --verbose flag
+	cfg.Verbose = true
+
+	manager := &mockConfigUpdater{config: cfg}
+
+	// Create watcher with cliVerbose=true (simulating --verbose flag was passed)
+	watcher, err := NewConfigWatcher(configPath, cfg, manager, true)
+	if err != nil {
+		t.Fatalf("Failed to create watcher: %v", err)
+	}
+
+	watcher.Start()
+	defer watcher.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Modify config (still without verbose flag)
+	updatedConfig := `apiVersion: lazyfwd/v1
+http:
+  listen: ":8989"
+  idle_timeout: 60m
+  k8s:
+    routes:
+      updated.localhost:
+        context: test
+        namespace: default
+        service: updated
+        port: 8080
+`
+	if err := os.WriteFile(configPath, []byte(updatedConfig), 0644); err != nil {
+		t.Fatalf("Failed to write updated config: %v", err)
+	}
+
+	// Wait for debounce + processing
+	time.Sleep(800 * time.Millisecond)
+
+	// Verify that Verbose is still true (preserved from CLI flag)
+	currentCfg := manager.getConfig()
+	if !currentCfg.Verbose {
+		t.Error("Expected Verbose to be true after reload (CLI flag should be preserved)")
+	}
+
+	// Also verify the config was actually reloaded
+	_, hasUpdatedRoute := currentCfg.HTTP.K8s.Routes["updated.localhost"]
+	if !hasUpdatedRoute {
+		t.Error("Expected config to be reloaded with new route")
 	}
 }
