@@ -6,6 +6,12 @@ apiVersion: lazyfwd/v1
 # Auto-reload on file changes. Any changes need `brew services restart lazyfwd` while it is false.
 auto_reload_config: true
 
+# Additional paths for exec credential plugins (e.g., aws-iam-authenticator, gcloud)
+# Common paths (/usr/local/bin, /opt/homebrew/bin, etc.) are added automatically.
+# Add custom paths here if your credential plugin is in a non-standard location.
+# exec_path:
+#   - /custom/path/to/binaries
+
 http:
   # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
   listen: ":8989"  # Port changes require: brew services restart lazyfwd
@@ -15,8 +21,11 @@ http:
   idle_timeout: 60m
 
   k8s:
-    # Path to kubeconfig (optional, defaults to ~/.kube/config)
+    # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
+    # If not set: uses $KUBECONFIG env var, or defaults to ~/.kube/config
+    # Note: $KUBECONFIG is NOT available when running as brew service (launchd limitation)
     # kubeconfig: ~/.kube/config
+    # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
     routes:
       # # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)

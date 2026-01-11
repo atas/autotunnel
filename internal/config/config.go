@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +18,7 @@ type Config struct {
 	ApiVersion       string     `yaml:"apiVersion"`
 	Verbose          bool       `yaml:"verbose"`
 	AutoReloadConfig *bool      `yaml:"auto_reload_config"` // nil = true (default)
+	ExecPath         []string   `yaml:"exec_path"`          // Additional PATH entries for exec credential plugins
 	HTTP             HTTPConfig `yaml:"http"`
 }
 
@@ -34,11 +36,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Expand home directory in kubeconfig path
-	if len(cfg.HTTP.K8s.Kubeconfig) > 0 && cfg.HTTP.K8s.Kubeconfig[0] == '~' {
-		home, _ := os.UserHomeDir()
-		cfg.HTTP.K8s.Kubeconfig = filepath.Join(home, cfg.HTTP.K8s.Kubeconfig[1:])
-	}
+	// Resolve kubeconfig paths (supports multiple colon-separated paths and $KUBECONFIG fallback)
+	cfg.HTTP.K8s.ResolvedKubeconfigs = resolveKubeconfigs(cfg.HTTP.K8s.Kubeconfig)
 
 	// Validate the loaded configuration
 	if err := cfg.Validate(); err != nil {
@@ -46,4 +45,45 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// resolveKubeconfigs resolves kubeconfig path(s) with the following priority:
+// 1. Explicit path(s) from config (colon-separated on Unix, semicolon on Windows)
+// 2. $KUBECONFIG environment variable
+// 3. Default ~/.kube/config
+func resolveKubeconfigs(configValue string) []string {
+	var pathStr string
+
+	if configValue != "" {
+		// Use explicit paths from config
+		pathStr = configValue
+	} else if envValue := os.Getenv("KUBECONFIG"); envValue != "" {
+		// Fall back to $KUBECONFIG environment variable
+		pathStr = envValue
+	} else {
+		// Fall back to default ~/.kube/config
+		home, _ := os.UserHomeDir()
+		return []string{filepath.Join(home, ".kube", "config")}
+	}
+
+	// Split by OS-specific path separator (: on Unix, ; on Windows)
+	paths := filepath.SplitList(pathStr)
+
+	// Expand tilde in each path
+	home, _ := os.UserHomeDir()
+	resolved := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.HasPrefix(p, "~/") {
+			p = filepath.Join(home, p[2:])
+		} else if p == "~" {
+			p = home
+		}
+		resolved = append(resolved, p)
+	}
+
+	return resolved
 }

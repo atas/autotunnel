@@ -16,7 +16,7 @@ type k8sClient struct {
 }
 
 // getClientsetAndConfig returns a cached or newly created k8s client for the given context
-func (m *Manager) getClientsetAndConfig(kubeconfig, contextName string) (*kubernetes.Clientset, *rest.Config, error) {
+func (m *Manager) getClientsetAndConfig(kubeconfigPaths []string, contextName string) (*kubernetes.Clientset, *rest.Config, error) {
 	// Try read lock first for cached client
 	m.k8sClientsMu.RLock()
 	if client, ok := m.k8sClients[contextName]; ok {
@@ -34,9 +34,13 @@ func (m *Manager) getClientsetAndConfig(kubeconfig, contextName string) (*kubern
 		return client.clientset, client.restConfig, nil
 	}
 
-	// Build REST config
+	// Build REST config with support for multiple kubeconfig files
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	loadingRules.ExplicitPath = kubeconfig
+	if len(kubeconfigPaths) > 0 {
+		// Use explicit paths from config (merged in order)
+		loadingRules.Precedence = kubeconfigPaths
+	}
+	// If kubeconfigPaths is empty, client-go will use $KUBECONFIG or default ~/.kube/config
 	configOverrides := &clientcmd.ConfigOverrides{CurrentContext: contextName}
 	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
 
