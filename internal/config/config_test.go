@@ -1,4 +1,4 @@
-package internal
+package config
 
 import (
 	"os"
@@ -130,6 +130,8 @@ http:
 		t.Errorf("expected context 'test', got %q", route.Context)
 	}
 
+	// Note: Validate() is now called inside LoadConfig(), so we don't need to call it again
+	// but calling it again is harmless
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("validation failed: %v", err)
 	}
