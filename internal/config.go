@@ -45,13 +45,11 @@ type K8sRouteConfig struct {
 	Scheme    string `yaml:"scheme"` // "http" or "https" - controls X-Forwarded-Proto header (default: http)
 }
 
-// DefaultConfig returns configuration with sensible defaults
+// DefaultConfig returns configuration with sensible defaults for optional fields
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
 		HTTP: HTTPConfig{
-			ListenAddr:  ":8989",
-			IdleTimeout: 60 * time.Minute,
 			K8s: K8sConfig{
 				Kubeconfig: filepath.Join(home, ".kube", "config"),
 				Routes:     make(map[string]K8sRouteConfig),
@@ -71,6 +69,14 @@ func LoadConfig(path string) (*Config, error) {
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Validate required fields
+	if cfg.HTTP.ListenAddr == "" {
+		return nil, fmt.Errorf("missing required field: http.listen")
+	}
+	if cfg.HTTP.IdleTimeout == 0 {
+		return nil, fmt.Errorf("missing required field: http.idle_timeout")
 	}
 
 	// Expand home directory in kubeconfig path
