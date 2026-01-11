@@ -81,6 +81,12 @@ https://github.com/atas/lazyfwd`)
 		cfg.Verbose = true
 	}
 
+	// Expand PATH for exec credential plugins (important for systemd/launchd services)
+	config.ExpandExecPath(cfg.ExecPath)
+	if cfg.Verbose {
+		log.Printf("PATH expanded for exec credential plugins")
+	}
+
 	fmt.Println("-----------------------------------------------------------------------------")
 	if len(cfg.HTTP.K8s.Routes) == 0 {
 		fmt.Println("Add/remove routes !!!❗️⚠️🔴")

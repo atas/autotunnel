@@ -28,7 +28,7 @@ func (m *Manager) GetOrCreateTunnel(hostname string) (TunnelHandle, error) {
 	}
 
 	// Get or create shared k8s client for this context
-	clientset, restConfig, err := m.getClientsetAndConfig(m.config.HTTP.K8s.Kubeconfig, routeConfig.Context)
+	clientset, restConfig, err := m.getClientsetAndConfig(m.config.HTTP.K8s.ResolvedKubeconfigs, routeConfig.Context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s client for context %s: %w", routeConfig.Context, err)
 	}

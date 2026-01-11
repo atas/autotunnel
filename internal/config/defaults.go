@@ -3,7 +3,6 @@ package config
 import (
 	_ "embed"
 	"os"
-	"path/filepath"
 )
 
 // defaultConfigTemplate is the template for a new config file
@@ -13,11 +12,10 @@ var defaultConfigTemplate string
 
 // DefaultConfig returns configuration with sensible defaults for optional fields
 func DefaultConfig() *Config {
-	home, _ := os.UserHomeDir()
 	return &Config{
 		HTTP: HTTPConfig{
 			K8s: K8sConfig{
-				Kubeconfig: filepath.Join(home, ".kube", "config"),
+				Kubeconfig: "", // Empty = try $KUBECONFIG env var, then ~/.kube/config
 				Routes:     make(map[string]K8sRouteConfig),
 			},
 		},

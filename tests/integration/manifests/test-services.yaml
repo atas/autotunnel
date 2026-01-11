@@ -93,3 +93,323 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
+---
+# ============================================================================
+# Additional test services for expanded integration test coverage
+# ============================================================================
+
+# ConfigMap for nginx TLS configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-tls-config
+  namespace: lazyfwd-test
+data:
+  nginx.conf: |
+    events { worker_connections 1024; }
+    http {
+        server {
+            listen 443 ssl;
+            server_name nginx-tls.test localhost;
+            ssl_certificate /etc/nginx/ssl/tls.crt;
+            ssl_certificate_key /etc/nginx/ssl/tls.key;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            location / {
+                return 200 'lazyfwd-tls-integration-test\n';
+                add_header Content-Type text/plain;
+            }
+            location /health { return 200 'OK'; }
+        }
+    }
+---
+# nginx deployment with TLS using init container for certificate generation
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-tls
+  namespace: lazyfwd-test
+  labels:
+    app: nginx-tls
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-tls
+  template:
+    metadata:
+      labels:
+        app: nginx-tls
+    spec:
+      initContainers:
+        - name: generate-certs
+          image: alpine:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache openssl &&
+              printf '[req]\ndistinguished_name=dn\nx509_extensions=v3\nprompt=no\n[dn]\nCN=nginx-tls.test\n[v3]\nsubjectAltName=DNS:nginx-tls.test,DNS:localhost\n' > /tmp/ssl.cnf &&
+              openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /ssl/tls.key -out /ssl/tls.crt -config /tmp/ssl.cnf &&
+              chmod 644 /ssl/tls.crt && chmod 600 /ssl/tls.key &&
+              ls -la /ssl/
+          volumeMounts:
+            - name: ssl-certs
+              mountPath: /ssl
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 443
+          volumeMounts:
+            - name: ssl-certs
+              mountPath: /etc/nginx/ssl
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          readinessProbe:
+            exec:
+              command: ["wget", "--no-check-certificate", "-qO/dev/null", "https://127.0.0.1:443/health"]
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            timeoutSeconds: 3
+      volumes:
+        - name: ssl-certs
+          emptyDir: {}
+        - name: nginx-config
+          configMap:
+            name: nginx-tls-config
+---
+# Service for nginx-tls
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-tls
+  namespace: lazyfwd-test
+spec:
+  selector:
+    app: nginx-tls
+  ports:
+    - port: 443
+      targetPort: 443
+---
+# Echo server with named ports for testing named port resolution
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-named-ports
+  namespace: lazyfwd-test
+  labels:
+    app: echo-named-ports
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-named-ports
+  template:
+    metadata:
+      labels:
+        app: echo-named-ports
+    spec:
+      containers:
+        - name: echo
+          image: hashicorp/http-echo
+          args: ["-text=named-port-test", "-listen=:8080"]
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 3
+---
+# Service for echo-named-ports with named targetPort
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-named-ports
+  namespace: lazyfwd-test
+spec:
+  selector:
+    app: echo-named-ports
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
+---
+# Multi-port service with three containers on different ports
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-port
+  namespace: lazyfwd-test
+  labels:
+    app: multi-port
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multi-port
+  template:
+    metadata:
+      labels:
+        app: multi-port
+    spec:
+      containers:
+        - name: api
+          image: hashicorp/http-echo
+          args: ["-text=api-response", "-listen=:8080"]
+          ports:
+            - containerPort: 8080
+              name: api
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 3
+        - name: admin
+          image: hashicorp/http-echo
+          args: ["-text=admin-response", "-listen=:8081"]
+          ports:
+            - containerPort: 8081
+              name: admin
+        - name: metrics
+          image: hashicorp/http-echo
+          args: ["-text=metrics-response", "-listen=:8082"]
+          ports:
+            - containerPort: 8082
+              name: metrics
+---
+# Service for multi-port with all three ports exposed
+apiVersion: v1
+kind: Service
+metadata:
+  name: multi-port
+  namespace: lazyfwd-test
+spec:
+  selector:
+    app: multi-port
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: api
+    - port: 8081
+      targetPort: 8081
+      name: admin
+    - port: 8082
+      targetPort: 8082
+      name: metrics
+---
+# WebSocket echo server for testing WebSocket upgrade handling
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: websocket-echo
+  namespace: lazyfwd-test
+  labels:
+    app: websocket-echo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: websocket-echo
+  template:
+    metadata:
+      labels:
+        app: websocket-echo
+    spec:
+      containers:
+        - name: echo
+          image: jmalloc/echo-server:latest
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 3
+---
+# Service for websocket-echo
+apiVersion: v1
+kind: Service
+metadata:
+  name: websocket-echo
+  namespace: lazyfwd-test
+spec:
+  selector:
+    app: websocket-echo
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# Standalone pod for testing direct pod targeting (no service)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: standalone-pod
+  namespace: lazyfwd-test
+  labels:
+    app: standalone-pod
+spec:
+  containers:
+    - name: echo
+      image: hashicorp/http-echo
+      args: ["-text=direct-pod-test", "-listen=:8080"]
+      ports:
+        - containerPort: 8080
+      readinessProbe:
+        httpGet:
+          path: /
+          port: 8080
+        initialDelaySeconds: 2
+        periodSeconds: 3
+---
+# Echo server that reflects request headers (for testing X-Forwarded-* headers)
+# Using ealen/echo-server which returns all request info as JSON
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-headers
+  namespace: lazyfwd-test
+  labels:
+    app: echo-headers
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-headers
+  template:
+    metadata:
+      labels:
+        app: echo-headers
+    spec:
+      containers:
+        - name: echo
+          image: ealen/echo-server:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: PORT
+              value: "80"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 3
+---
+# Service for echo-headers
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-headers
+  namespace: lazyfwd-test
+spec:
+  selector:
+    app: echo-headers
+  ports:
+    - port: 80
+      targetPort: 80

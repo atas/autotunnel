@@ -202,11 +202,14 @@ http:
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	// Should have expanded ~ to home directory
+	// Should have expanded ~ to home directory in ResolvedKubeconfigs
 	home, _ := os.UserHomeDir()
 	expected := filepath.Join(home, ".kube", "config")
-	if cfg.HTTP.K8s.Kubeconfig != expected {
-		t.Errorf("expected kubeconfig %q, got %q", expected, cfg.HTTP.K8s.Kubeconfig)
+	if len(cfg.HTTP.K8s.ResolvedKubeconfigs) != 1 {
+		t.Fatalf("expected 1 resolved kubeconfig, got %d", len(cfg.HTTP.K8s.ResolvedKubeconfigs))
+	}
+	if cfg.HTTP.K8s.ResolvedKubeconfigs[0] != expected {
+		t.Errorf("expected resolved kubeconfig %q, got %q", expected, cfg.HTTP.K8s.ResolvedKubeconfigs[0])
 	}
 }
 
@@ -576,16 +579,230 @@ func boolPtr(b bool) *bool {
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	// Verify kubeconfig defaults to ~/.kube/config
-	home, _ := os.UserHomeDir()
-	expectedKubeconfig := filepath.Join(home, ".kube", "config")
-	if cfg.HTTP.K8s.Kubeconfig != expectedKubeconfig {
-		t.Errorf("expected kubeconfig %q, got %q", expectedKubeconfig, cfg.HTTP.K8s.Kubeconfig)
+	// Verify kubeconfig defaults to empty (so $KUBECONFIG can be tried)
+	if cfg.HTTP.K8s.Kubeconfig != "" {
+		t.Errorf("expected empty kubeconfig default, got %q", cfg.HTTP.K8s.Kubeconfig)
 	}
 
 	// Verify Routes map is initialized (not nil)
 	if cfg.HTTP.K8s.Routes == nil {
 		t.Error("expected Routes map to be initialized, got nil")
+	}
+}
+
+func TestResolveKubeconfigs_MultiplePaths(t *testing.T) {
+	// Create a temporary config file with multiple colon-separated kubeconfig paths
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `apiVersion: lazyfwd/v1
+
+http:
+  listen: ":9999"
+  idle_timeout: 30m
+
+  k8s:
+    kubeconfig: ~/.kube/config:~/.kube/prod-config:/absolute/path/config
+
+    routes:
+      test.localhost:
+        context: test
+        namespace: default
+        service: test-svc
+        port: 80
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Should have 3 resolved paths
+	if len(cfg.HTTP.K8s.ResolvedKubeconfigs) != 3 {
+		t.Fatalf("expected 3 resolved kubeconfigs, got %d: %v", len(cfg.HTTP.K8s.ResolvedKubeconfigs), cfg.HTTP.K8s.ResolvedKubeconfigs)
+	}
+
+	home, _ := os.UserHomeDir()
+
+	// First path should have ~ expanded
+	expected1 := filepath.Join(home, ".kube", "config")
+	if cfg.HTTP.K8s.ResolvedKubeconfigs[0] != expected1 {
+		t.Errorf("expected first path %q, got %q", expected1, cfg.HTTP.K8s.ResolvedKubeconfigs[0])
+	}
+
+	// Second path should have ~ expanded
+	expected2 := filepath.Join(home, ".kube", "prod-config")
+	if cfg.HTTP.K8s.ResolvedKubeconfigs[1] != expected2 {
+		t.Errorf("expected second path %q, got %q", expected2, cfg.HTTP.K8s.ResolvedKubeconfigs[1])
+	}
+
+	// Third path is absolute, should be unchanged
+	expected3 := "/absolute/path/config"
+	if cfg.HTTP.K8s.ResolvedKubeconfigs[2] != expected3 {
+		t.Errorf("expected third path %q, got %q", expected3, cfg.HTTP.K8s.ResolvedKubeconfigs[2])
+	}
+}
+
+func TestResolveKubeconfigs_EnvVarFallback(t *testing.T) {
+	// Save and restore KUBECONFIG env var
+	originalKubeconfig := os.Getenv("KUBECONFIG")
+	defer func() {
+		if originalKubeconfig != "" {
+			os.Setenv("KUBECONFIG", originalKubeconfig)
+		} else {
+			os.Unsetenv("KUBECONFIG")
+		}
+	}()
+
+	// Set KUBECONFIG env var
+	os.Setenv("KUBECONFIG", "/env/path/config1:/env/path/config2")
+
+	// Create a config WITHOUT kubeconfig specified
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `apiVersion: lazyfwd/v1
+
+http:
+  listen: ":9999"
+  idle_timeout: 30m
+
+  k8s:
+    routes:
+      test.localhost:
+        context: test
+        namespace: default
+        service: test-svc
+        port: 80
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Should fall back to $KUBECONFIG
+	if len(cfg.HTTP.K8s.ResolvedKubeconfigs) != 2 {
+		t.Fatalf("expected 2 resolved kubeconfigs from env var, got %d: %v", len(cfg.HTTP.K8s.ResolvedKubeconfigs), cfg.HTTP.K8s.ResolvedKubeconfigs)
+	}
+
+	if cfg.HTTP.K8s.ResolvedKubeconfigs[0] != "/env/path/config1" {
+		t.Errorf("expected first path from env var, got %q", cfg.HTTP.K8s.ResolvedKubeconfigs[0])
+	}
+	if cfg.HTTP.K8s.ResolvedKubeconfigs[1] != "/env/path/config2" {
+		t.Errorf("expected second path from env var, got %q", cfg.HTTP.K8s.ResolvedKubeconfigs[1])
+	}
+}
+
+func TestResolveKubeconfigs_DefaultFallback(t *testing.T) {
+	// Save and restore KUBECONFIG env var
+	originalKubeconfig := os.Getenv("KUBECONFIG")
+	defer func() {
+		if originalKubeconfig != "" {
+			os.Setenv("KUBECONFIG", originalKubeconfig)
+		} else {
+			os.Unsetenv("KUBECONFIG")
+		}
+	}()
+
+	// Unset KUBECONFIG
+	os.Unsetenv("KUBECONFIG")
+
+	// Create a config WITHOUT kubeconfig specified
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `apiVersion: lazyfwd/v1
+
+http:
+  listen: ":9999"
+  idle_timeout: 30m
+
+  k8s:
+    routes:
+      test.localhost:
+        context: test
+        namespace: default
+        service: test-svc
+        port: 80
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Should fall back to default ~/.kube/config
+	if len(cfg.HTTP.K8s.ResolvedKubeconfigs) != 1 {
+		t.Fatalf("expected 1 resolved kubeconfig (default), got %d: %v", len(cfg.HTTP.K8s.ResolvedKubeconfigs), cfg.HTTP.K8s.ResolvedKubeconfigs)
+	}
+
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, ".kube", "config")
+	if cfg.HTTP.K8s.ResolvedKubeconfigs[0] != expected {
+		t.Errorf("expected default kubeconfig %q, got %q", expected, cfg.HTTP.K8s.ResolvedKubeconfigs[0])
+	}
+}
+
+func TestResolveKubeconfigs_ExplicitOverridesEnv(t *testing.T) {
+	// Save and restore KUBECONFIG env var
+	originalKubeconfig := os.Getenv("KUBECONFIG")
+	defer func() {
+		if originalKubeconfig != "" {
+			os.Setenv("KUBECONFIG", originalKubeconfig)
+		} else {
+			os.Unsetenv("KUBECONFIG")
+		}
+	}()
+
+	// Set KUBECONFIG env var
+	os.Setenv("KUBECONFIG", "/env/path/should-be-ignored")
+
+	// Create a config WITH explicit kubeconfig
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `apiVersion: lazyfwd/v1
+
+http:
+  listen: ":9999"
+  idle_timeout: 30m
+
+  k8s:
+    kubeconfig: /explicit/path/config
+
+    routes:
+      test.localhost:
+        context: test
+        namespace: default
+        service: test-svc
+        port: 80
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Should use explicit path, not env var
+	if len(cfg.HTTP.K8s.ResolvedKubeconfigs) != 1 {
+		t.Fatalf("expected 1 resolved kubeconfig (explicit), got %d: %v", len(cfg.HTTP.K8s.ResolvedKubeconfigs), cfg.HTTP.K8s.ResolvedKubeconfigs)
+	}
+
+	if cfg.HTTP.K8s.ResolvedKubeconfigs[0] != "/explicit/path/config" {
+		t.Errorf("expected explicit kubeconfig path, got %q", cfg.HTTP.K8s.ResolvedKubeconfigs[0])
 	}
 }
 

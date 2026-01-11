@@ -56,8 +56,16 @@ jobs:
 
       - name: Wait for pods
         run: |
+          # Original services
           kubectl wait --for=condition=ready pod -l app=nginx -n lazyfwd-test --timeout=120s
           kubectl wait --for=condition=ready pod -l app=echo -n lazyfwd-test --timeout=120s
+          # New services for expanded test coverage
+          kubectl wait --for=condition=ready pod -l app=nginx-tls -n lazyfwd-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=echo-named-ports -n lazyfwd-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=multi-port -n lazyfwd-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=websocket-echo -n lazyfwd-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=standalone-pod -n lazyfwd-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=echo-headers -n lazyfwd-test --timeout=120s
 
       - name: Build binary
         run: go build -o lazyfwd .

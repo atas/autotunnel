@@ -11,8 +11,9 @@ type HTTPConfig struct {
 
 // K8sConfig represents Kubernetes backend configuration
 type K8sConfig struct {
-	Kubeconfig string                    `yaml:"kubeconfig"`
-	Routes     map[string]K8sRouteConfig `yaml:"routes"`
+	Kubeconfig          string                    `yaml:"kubeconfig"`
+	ResolvedKubeconfigs []string                  `yaml:"-"` // Computed: resolved paths (not from YAML)
+	Routes              map[string]K8sRouteConfig `yaml:"routes"`
 }
 
 // K8sRouteConfig represents a Kubernetes route mapping (service or pod)
