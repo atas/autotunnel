@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/atas/lazyfwd/internal/config"
 )
 
 // TestConfigWatcher_DetectsFileChanges verifies the watcher detects config file changes
@@ -31,19 +33,19 @@ http:
 	}
 
 	// Load initial config
-	config, err := LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
 	// Create a mock manager that tracks UpdateConfig calls
 	manager := &Manager{
-		config:  config,
+		config:  cfg,
 		tunnels: make(map[string]*Tunnel),
 	}
 
 	// Create watcher
-	watcher, err := NewConfigWatcher(configPath, config, manager, false)
+	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
@@ -111,17 +113,17 @@ http:
 		t.Fatalf("Failed to write initial config: %v", err)
 	}
 
-	config, err := LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
 	manager := &Manager{
-		config:  config,
+		config:  cfg,
 		tunnels: make(map[string]*Tunnel),
 	}
 
-	watcher, err := NewConfigWatcher(configPath, config, manager, false)
+	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
@@ -194,17 +196,17 @@ http:
 		t.Fatalf("Failed to write initial config: %v", err)
 	}
 
-	config, err := LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
 	manager := &Manager{
-		config:  config,
+		config:  cfg,
 		tunnels: make(map[string]*Tunnel),
 	}
 
-	watcher, err := NewConfigWatcher(configPath, config, manager, false)
+	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
@@ -268,17 +270,17 @@ http:
 		t.Fatalf("Failed to write initial config: %v", err)
 	}
 
-	config, err := LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
 	manager := &Manager{
-		config:  config,
+		config:  cfg,
 		tunnels: make(map[string]*Tunnel),
 	}
 
-	watcher, err := NewConfigWatcher(configPath, config, manager, false)
+	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}

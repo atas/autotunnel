@@ -13,11 +13,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/atas/lazyfwd/internal/config"
 )
 
 // Server handles both HTTP and TLS passthrough on a single port
 type Server struct {
-	config   *Config
+	config   *config.Config
 	manager  *Manager
 	listener *MuxListener
 	server   *http.Server
@@ -25,9 +27,9 @@ type Server struct {
 }
 
 // NewServer creates a new unified server
-func NewServer(config *Config, manager *Manager) *Server {
+func NewServer(cfg *config.Config, manager *Manager) *Server {
 	s := &Server{
-		config:  config,
+		config:  cfg,
 		manager: manager,
 		done:    make(chan struct{}),
 	}

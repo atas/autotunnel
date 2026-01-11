@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/atas/lazyfwd/internal"
+	"github.com/atas/lazyfwd/internal/config"
 )
 
 var (
@@ -56,52 +57,48 @@ https://github.com/atas/lazyfwd`)
 	log.SetPrefix("[lazyfwd] ")
 
 	// Check if config exists, create default if not
-	if !internal.ConfigExists(configPath) {
+	if !config.ConfigExists(configPath) {
 		fmt.Printf("Config file not found: %s\n", configPath)
 		fmt.Println("Creating default configuration file...")
 
-		if err := internal.CreateDefaultConfig(configPath); err != nil {
+		if err := config.CreateDefaultConfig(configPath); err != nil {
 			log.Fatalf("Failed to create config file: %v", err)
 		}
 
 		fmt.Printf("\nCreated: %s\n", configPath)
 	}
 
-	// Load configuration
-	config, err := internal.LoadConfig(configPath)
+	// Load configuration (includes validation)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config from %s: %v", configPath, err)
 	}
 
 	// Override verbose from flag
 	if verbose {
-		config.Verbose = true
-	}
-
-	if err := config.Validate(); err != nil {
-		log.Fatalf("Invalid configuration: %v", err)
+		cfg.Verbose = true
 	}
 
 	fmt.Println("-----------------------------------------------------------------------------")
-	if len(config.HTTP.K8s.Routes) == 0 {
+	if len(cfg.HTTP.K8s.Routes) == 0 {
 		fmt.Println("Add/remove routes !!!❗️⚠️🔴")
 	}
 	fmt.Printf("Config: %s\n", configPath)
 	fmt.Println("-----------------------------------------------------------------------------")
-	config.LogRoutes()
+	cfg.LogRoutes()
 
 	// Create manager and server
-	manager := internal.NewManager(config)
-	server := internal.NewServer(config, manager)
+	manager := internal.NewManager(cfg)
+	server := internal.NewServer(cfg, manager)
 
 	// Start manager
 	manager.Start()
 
 	// Start config watcher if auto-reload is enabled
 	var configWatcher *internal.ConfigWatcher
-	if config.ShouldAutoReload() {
+	if cfg.ShouldAutoReload() {
 		var err error
-		configWatcher, err = internal.NewConfigWatcher(configPath, config, manager, verbose)
+		configWatcher, err = internal.NewConfigWatcher(configPath, cfg, manager, verbose)
 		if err != nil {
 			log.Printf("Warning: Failed to start config watcher: %v", err)
 		} else {
@@ -120,7 +117,7 @@ https://github.com/atas/lazyfwd`)
 		}
 	}()
 
-	fmt.Printf("Listening on %s\n", config.HTTP.ListenAddr)
+	fmt.Printf("Listening on %s\n", cfg.HTTP.ListenAddr)
 
 	// Wait for signal
 	sig := <-sigChan

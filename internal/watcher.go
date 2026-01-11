@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/atas/lazyfwd/internal/config"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -16,14 +17,14 @@ type ConfigWatcher struct {
 	cliVerbose bool // Preserve CLI --verbose flag across reloads
 
 	mu            sync.Mutex
-	currentConfig *Config
+	currentConfig *config.Config
 
 	stopChan chan struct{}
 	doneChan chan struct{}
 }
 
 // NewConfigWatcher creates a new config file watcher
-func NewConfigWatcher(configPath string, initialConfig *Config, manager *Manager, cliVerbose bool) (*ConfigWatcher, error) {
+func NewConfigWatcher(configPath string, initialConfig *config.Config, manager *Manager, cliVerbose bool) (*ConfigWatcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -113,14 +114,10 @@ func (cw *ConfigWatcher) watchLoop() {
 func (cw *ConfigWatcher) reloadConfig() {
 	log.Println("Config file changed, reloading...")
 
-	newConfig, err := LoadConfig(cw.configPath)
+	// LoadConfig now includes validation
+	newConfig, err := config.LoadConfig(cw.configPath)
 	if err != nil {
 		log.Printf("Failed to load config: %v (keeping current config)", err)
-		return
-	}
-
-	if err := newConfig.Validate(); err != nil {
-		log.Printf("Invalid config: %v (keeping current config)", err)
 		return
 	}
 

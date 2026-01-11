@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/atas/lazyfwd/internal/config"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -52,7 +53,7 @@ type Tunnel struct {
 
 	// Configuration
 	hostname   string
-	config     K8sRouteConfig
+	config     config.K8sRouteConfig
 	listenAddr string
 	verbose    bool
 
@@ -74,10 +75,10 @@ type Tunnel struct {
 }
 
 // NewTunnel creates a new tunnel instance
-func NewTunnel(hostname string, config K8sRouteConfig, clientset *kubernetes.Clientset, restConfig *rest.Config, listenAddr string, verbose bool) *Tunnel {
+func NewTunnel(hostname string, cfg config.K8sRouteConfig, clientset *kubernetes.Clientset, restConfig *rest.Config, listenAddr string, verbose bool) *Tunnel {
 	return &Tunnel{
 		hostname:   hostname,
-		config:     config,
+		config:     cfg,
 		clientset:  clientset,
 		restConfig: restConfig,
 		listenAddr: listenAddr,

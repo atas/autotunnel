@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/atas/lazyfwd/internal/config"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -23,7 +24,7 @@ type Manager struct {
 	mu sync.RWMutex
 
 	// Configuration
-	config *Config
+	config *config.Config
 
 	// Active tunnels keyed by hostname
 	tunnels map[string]*Tunnel
@@ -39,10 +40,10 @@ type Manager struct {
 }
 
 // NewManager creates a new tunnel manager
-func NewManager(config *Config) *Manager {
+func NewManager(cfg *config.Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		config:     config,
+		config:     cfg,
 		tunnels:    make(map[string]*Tunnel),
 		k8sClients: make(map[string]*k8sClient),
 		ctx:        ctx,
@@ -165,7 +166,7 @@ func (m *Manager) Shutdown() {
 }
 
 // UpdateConfig updates the manager's configuration and cleans up removed routes
-func (m *Manager) UpdateConfig(newConfig *Config) {
+func (m *Manager) UpdateConfig(newConfig *config.Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
