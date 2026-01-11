@@ -13,6 +13,8 @@ import (
 
 	"github.com/atas/lazyfwd/internal"
 	"github.com/atas/lazyfwd/internal/config"
+	"github.com/atas/lazyfwd/internal/httpserver"
+	"github.com/atas/lazyfwd/internal/tunnelmgr"
 )
 
 var (
@@ -88,8 +90,8 @@ https://github.com/atas/lazyfwd`)
 	cfg.LogRoutes()
 
 	// Create manager and server
-	manager := internal.NewManager(cfg)
-	server := internal.NewServer(cfg, manager)
+	manager := tunnelmgr.NewManager(cfg)
+	server := httpserver.NewServer(cfg, manager)
 
 	// Start manager
 	manager.Start()

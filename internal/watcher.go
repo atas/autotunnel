@@ -9,10 +9,15 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// ConfigUpdater is an interface for updating configuration
+type ConfigUpdater interface {
+	UpdateConfig(newConfig *config.Config)
+}
+
 // ConfigWatcher watches the config file for changes and reloads on valid updates
 type ConfigWatcher struct {
 	configPath string
-	manager    *Manager
+	manager    ConfigUpdater
 	watcher    *fsnotify.Watcher
 	cliVerbose bool // Preserve CLI --verbose flag across reloads
 
@@ -24,7 +29,7 @@ type ConfigWatcher struct {
 }
 
 // NewConfigWatcher creates a new config file watcher
-func NewConfigWatcher(configPath string, initialConfig *config.Config, manager *Manager, cliVerbose bool) (*ConfigWatcher, error) {
+func NewConfigWatcher(configPath string, initialConfig *config.Config, manager ConfigUpdater, cliVerbose bool) (*ConfigWatcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err

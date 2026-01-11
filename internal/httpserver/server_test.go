@@ -1,4 +1,4 @@
-package internal
+package httpserver
 
 import (
 	"bufio"
@@ -64,12 +64,12 @@ func TestPeekConn_IsTLS(t *testing.T) {
 				_, _ = client.Write(tt.data)
 			}()
 
-			// Create PeekConn and test
-			peekConn := NewPeekConn(server)
-			result := peekConn.IsTLS()
+			// Create peekConn and test
+			pc := newPeekConn(server)
+			result := pc.isTLS()
 
 			if result != tt.expected {
-				t.Errorf("IsTLS() = %v, expected %v", result, tt.expected)
+				t.Errorf("isTLS() = %v, expected %v", result, tt.expected)
 			}
 		})
 	}
@@ -158,9 +158,9 @@ func TestExtractSNI_InvalidData(t *testing.T) {
 
 func TestMuxListener_ProtocolDetection(t *testing.T) {
 	// Create a mux listener on a random port
-	mux, err := NewMuxListener("127.0.0.1:0")
+	mux, err := newMuxListener("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("Failed to create MuxListener: %v", err)
+		t.Fatalf("Failed to create muxListener: %v", err)
 	}
 	defer mux.Close()
 
@@ -185,8 +185,8 @@ func TestMuxListener_ProtocolDetection(t *testing.T) {
 		defer accepted.Close()
 
 		// Wrap and check
-		peekConn := NewPeekConn(accepted)
-		if peekConn.IsTLS() {
+		pc := newPeekConn(accepted)
+		if pc.isTLS() {
 			t.Error("HTTP connection incorrectly detected as TLS")
 		}
 	})
@@ -422,10 +422,10 @@ func TestPeekConn_ReadAfterPeek(t *testing.T) {
 		client.Close()
 	}()
 
-	peekConn := NewPeekConn(server)
+	pc := newPeekConn(server)
 
 	// Peek at first byte
-	peeked, err := peekConn.Peek(1)
+	peeked, err := pc.Peek(1)
 	if err != nil {
 		t.Fatalf("Peek failed: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestPeekConn_ReadAfterPeek(t *testing.T) {
 	}
 
 	// Now read all data - should get full content including peeked byte
-	all, err := io.ReadAll(peekConn)
+	all, err := io.ReadAll(pc)
 	if err != nil {
 		t.Fatalf("ReadAll failed: %v", err)
 	}
@@ -445,19 +445,19 @@ func TestPeekConn_ReadAfterPeek(t *testing.T) {
 }
 
 func TestMuxListener_HTTPListener(t *testing.T) {
-	mux, err := NewMuxListener("127.0.0.1:0")
+	mux, err := newMuxListener("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("Failed to create MuxListener: %v", err)
+		t.Fatalf("Failed to create muxListener: %v", err)
 	}
 	defer mux.Close()
 
-	httpListener := mux.HTTPListener()
-	if httpListener == nil {
-		t.Fatal("HTTPListener returned nil")
+	httpLis := mux.httpListener()
+	if httpLis == nil {
+		t.Fatal("httpListener returned nil")
 	}
 
 	// Verify Addr() works
-	if httpListener.Addr() == nil {
-		t.Error("HTTPListener.Addr() returned nil")
+	if httpLis.Addr() == nil {
+		t.Error("httpListener.Addr() returned nil")
 	}
 }

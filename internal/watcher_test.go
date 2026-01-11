@@ -3,11 +3,30 @@ package internal
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/atas/lazyfwd/internal/config"
 )
+
+// mockConfigUpdater implements ConfigUpdater for testing
+type mockConfigUpdater struct {
+	mu     sync.RWMutex
+	config *config.Config
+}
+
+func (m *mockConfigUpdater) UpdateConfig(newConfig *config.Config) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config = newConfig
+}
+
+func (m *mockConfigUpdater) getConfig() *config.Config {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config
+}
 
 // TestConfigWatcher_DetectsFileChanges verifies the watcher detects config file changes
 func TestConfigWatcher_DetectsFileChanges(t *testing.T) {
@@ -39,10 +58,7 @@ http:
 	}
 
 	// Create a mock manager that tracks UpdateConfig calls
-	manager := &Manager{
-		config:  cfg,
-		tunnels: make(map[string]*Tunnel),
-	}
+	manager := &mockConfigUpdater{config: cfg}
 
 	// Create watcher
 	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
@@ -77,10 +93,9 @@ http:
 	time.Sleep(800 * time.Millisecond)
 
 	// Verify manager has updated routes
-	manager.mu.RLock()
-	_, hasUpdatedRoute := manager.config.HTTP.K8s.Routes["updated.localhost"]
-	_, hasOldRoute := manager.config.HTTP.K8s.Routes["test.localhost"]
-	manager.mu.RUnlock()
+	currentCfg := manager.getConfig()
+	_, hasUpdatedRoute := currentCfg.HTTP.K8s.Routes["updated.localhost"]
+	_, hasOldRoute := currentCfg.HTTP.K8s.Routes["test.localhost"]
 
 	if !hasUpdatedRoute {
 		t.Error("Expected manager config to have 'updated.localhost' route after reload")
@@ -118,10 +133,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &Manager{
-		config:  cfg,
-		tunnels: make(map[string]*Tunnel),
-	}
+	manager := &mockConfigUpdater{config: cfg}
 
 	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
@@ -160,10 +172,9 @@ http:
 	time.Sleep(1000 * time.Millisecond)
 
 	// Verify updated route
-	manager.mu.RLock()
-	_, hasAtomicRoute := manager.config.HTTP.K8s.Routes["atomic.localhost"]
-	_, hasInitialRoute := manager.config.HTTP.K8s.Routes["initial.localhost"]
-	manager.mu.RUnlock()
+	currentCfg := manager.getConfig()
+	_, hasAtomicRoute := currentCfg.HTTP.K8s.Routes["atomic.localhost"]
+	_, hasInitialRoute := currentCfg.HTTP.K8s.Routes["initial.localhost"]
 
 	if !hasAtomicRoute {
 		t.Error("Expected manager config to have 'atomic.localhost' route after atomic rename")
@@ -201,10 +212,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &Manager{
-		config:  cfg,
-		tunnels: make(map[string]*Tunnel),
-	}
+	manager := &mockConfigUpdater{config: cfg}
 
 	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
@@ -235,10 +243,9 @@ http:
 	time.Sleep(800 * time.Millisecond)
 
 	// Original config should be preserved
-	manager.mu.RLock()
-	_, hasValidRoute := manager.config.HTTP.K8s.Routes["valid.localhost"]
-	_, hasBrokenRoute := manager.config.HTTP.K8s.Routes["broken.localhost"]
-	manager.mu.RUnlock()
+	currentCfg := manager.getConfig()
+	_, hasValidRoute := currentCfg.HTTP.K8s.Routes["valid.localhost"]
+	_, hasBrokenRoute := currentCfg.HTTP.K8s.Routes["broken.localhost"]
 
 	if !hasValidRoute {
 		t.Error("Expected original 'valid.localhost' route to be preserved after invalid config")
@@ -275,10 +282,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &Manager{
-		config:  cfg,
-		tunnels: make(map[string]*Tunnel),
-	}
+	manager := &mockConfigUpdater{config: cfg}
 
 	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
 	if err != nil {
