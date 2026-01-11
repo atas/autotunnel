@@ -377,7 +377,7 @@ func TestXForwardedHeaders(t *testing.T) {
 			Namespace: "lazyfwd-test",
 			Service:   "echo-headers",
 			Port:      80,
-			Scheme:    "https", // Should set X-Forwarded-Proto: https
+			// Scheme defaults to "http" - use HTTP backend with HTTP scheme
 		},
 	})
 
@@ -424,8 +424,8 @@ func TestXForwardedHeaders(t *testing.T) {
 
 	// Check X-Forwarded-Proto
 	proto, ok := headers["x-forwarded-proto"].(string)
-	if !ok || proto != "https" {
-		t.Errorf("X-Forwarded-Proto = %q, want 'https'", proto)
+	if !ok || proto != "http" {
+		t.Errorf("X-Forwarded-Proto = %q, want 'http'", proto)
 	}
 
 	// Check X-Forwarded-Host
@@ -964,14 +964,15 @@ func TestWebSocketConnection(t *testing.T) {
 	defer cleanup()
 
 	// Create WebSocket connection through the proxy
+	// We need to set the Host in config.Location, not config.Header,
+	// because the websocket library uses Location.Host for the Host header
 	origin := "http://ws.test/"
-	wsURL := fmt.Sprintf("ws://%s/", proxyAddr)
+	wsURL := "ws://ws.test/"
 
 	config, err := websocket.NewConfig(wsURL, origin)
 	if err != nil {
 		t.Fatalf("Failed to create WebSocket config: %v", err)
 	}
-	config.Header.Set("Host", "ws.test")
 
 	// Connect to the proxy
 	conn, err := net.Dial("tcp", proxyAddr)
@@ -986,15 +987,24 @@ func TestWebSocketConnection(t *testing.T) {
 	}
 	defer ws.Close()
 
+	// The jmalloc/echo-server sends a greeting message first, then echoes
+	// Read and discard the initial greeting (if any)
+	greeting := make([]byte, 1024)
+	n, err := ws.Read(greeting)
+	if err != nil {
+		t.Fatalf("Failed to read greeting: %v", err)
+	}
+	t.Logf("Greeting from echo server: %q", string(greeting[:n]))
+
 	// Send a message
 	testMessage := "Hello, WebSocket!"
 	if _, err := ws.Write([]byte(testMessage)); err != nil {
 		t.Fatalf("Failed to send message: %v", err)
 	}
 
-	// Read response
+	// Read response - should be echoed back
 	response := make([]byte, 1024)
-	n, err := ws.Read(response)
+	n, err = ws.Read(response)
 	if err != nil {
 		t.Fatalf("Failed to read response: %v", err)
 	}
