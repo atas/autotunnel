@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"log"
 	"time"
-
-	"github.com/atas/lazyfwd/internal/tunnel"
 )
 
 // GetOrCreateTunnel returns an existing tunnel or creates a new one
@@ -36,7 +34,7 @@ func (m *Manager) GetOrCreateTunnel(hostname string) (TunnelHandle, error) {
 	}
 
 	// Create new tunnel with shared k8s resources
-	tun := tunnel.NewTunnel(hostname, routeConfig, clientset, restConfig, m.config.HTTP.ListenAddr, m.config.Verbose)
+	tun := m.tunnelFactory(hostname, routeConfig, clientset, restConfig, m.config.HTTP.ListenAddr, m.config.Verbose)
 	m.tunnels[hostname] = tun
 
 	return tun, nil

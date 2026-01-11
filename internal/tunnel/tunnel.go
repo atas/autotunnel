@@ -49,7 +49,7 @@ type Tunnel struct {
 	verbose    bool
 
 	// Shared k8s resources (from Manager)
-	clientset  *kubernetes.Clientset
+	clientset  kubernetes.Interface
 	restConfig *rest.Config
 
 	// State
@@ -66,7 +66,7 @@ type Tunnel struct {
 }
 
 // NewTunnel creates a new tunnel instance
-func NewTunnel(hostname string, cfg config.K8sRouteConfig, clientset *kubernetes.Clientset, restConfig *rest.Config, listenAddr string, verbose bool) *Tunnel {
+func NewTunnel(hostname string, cfg config.K8sRouteConfig, clientset kubernetes.Interface, restConfig *rest.Config, listenAddr string, verbose bool) *Tunnel {
 	return &Tunnel{
 		hostname:   hostname,
 		config:     cfg,

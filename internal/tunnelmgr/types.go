@@ -3,15 +3,20 @@ package tunnelmgr
 import (
 	"context"
 	"time"
+
+	"github.com/atas/lazyfwd/internal/tunnel"
 )
 
-// TunnelHandle provides access to tunnel operations needed by the HTTP server
+// TunnelHandle provides access to tunnel operations needed by the HTTP server and manager
 type TunnelHandle interface {
 	IsRunning() bool
 	Start(ctx context.Context) error
+	Stop()
 	LocalPort() int
 	Scheme() string
 	Touch()
+	IdleDuration() time.Duration
+	State() tunnel.State
 }
 
 // TunnelInfo contains information about a tunnel for display purposes

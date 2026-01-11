@@ -8,7 +8,21 @@ import (
 
 	"github.com/atas/lazyfwd/internal/config"
 	"github.com/atas/lazyfwd/internal/tunnel"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
+
+// TunnelFactory creates a new tunnel instance
+type TunnelFactory func(hostname string, cfg config.K8sRouteConfig,
+	clientset kubernetes.Interface, restConfig *rest.Config,
+	listenAddr string, verbose bool) TunnelHandle
+
+// defaultTunnelFactory creates real tunnel instances
+func defaultTunnelFactory(hostname string, cfg config.K8sRouteConfig,
+	clientset kubernetes.Interface, restConfig *rest.Config,
+	listenAddr string, verbose bool) TunnelHandle {
+	return tunnel.NewTunnel(hostname, cfg, clientset, restConfig, listenAddr, verbose)
+}
 
 // Manager handles the lifecycle of all tunnels
 type Manager struct {
@@ -18,7 +32,10 @@ type Manager struct {
 	config *config.Config
 
 	// Active tunnels keyed by hostname
-	tunnels map[string]*tunnel.Tunnel
+	tunnels map[string]TunnelHandle
+
+	// Factory for creating tunnels (enables testing with mocks)
+	tunnelFactory TunnelFactory
 
 	// Cached k8s clients per context name
 	k8sClients   map[string]*k8sClient
@@ -34,11 +51,12 @@ type Manager struct {
 func NewManager(cfg *config.Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		config:     cfg,
-		tunnels:    make(map[string]*tunnel.Tunnel),
-		k8sClients: make(map[string]*k8sClient),
-		ctx:        ctx,
-		cancel:     cancel,
+		config:        cfg,
+		tunnels:       make(map[string]TunnelHandle),
+		tunnelFactory: defaultTunnelFactory,
+		k8sClients:    make(map[string]*k8sClient),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 }
 
@@ -61,7 +79,7 @@ func (m *Manager) Shutdown() {
 			tunnel.Stop()
 		}
 	}
-	m.tunnels = make(map[string]*tunnel.Tunnel)
+	m.tunnels = make(map[string]TunnelHandle)
 	m.mu.Unlock()
 
 	// Clear cached k8s clients
