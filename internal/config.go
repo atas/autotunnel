@@ -92,7 +92,7 @@ auto_reload_config: true
 
 http:
   # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
-  listen: ":8989"
+  listen: ":8989"  # Port changes require: brew services restart lazyfwd
 
   # Idle timeout before closing tunnels (Go duration format)
   # After this duration of no traffic, the tunnel will be closed
@@ -203,10 +203,6 @@ func (c *Config) Validate() error {
 
 	if c.HTTP.IdleTimeout <= 0 {
 		return fmt.Errorf("http.idle_timeout must be positive")
-	}
-
-	if len(c.HTTP.K8s.Routes) == 0 {
-		return fmt.Errorf("at least one route must be configured in http.k8s.routes")
 	}
 
 	for hostname, route := range c.HTTP.K8s.Routes {

@@ -66,19 +66,6 @@ func main() {
 		}
 
 		fmt.Printf("\nCreated: %s\n", configPath)
-		fmt.Println("\nNext steps:")
-		fmt.Println("  1. Edit the config file to add your Kubernetes services")
-		fmt.Println("  2. Run 'lazyfwd' again to start the proxy")
-		fmt.Println("\nExample service configuration:")
-		fmt.Println("  http:")
-		fmt.Println("    k8s:")
-		fmt.Println("      services:")
-		fmt.Println("        grafana.localhost:")
-		fmt.Println("          context: my-cluster")
-		fmt.Println("          namespace: monitoring")
-		fmt.Println("          service: grafana")
-		fmt.Println("          port: 3000")
-		return
 	}
 
 	// Load configuration
@@ -96,7 +83,12 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
-	fmt.Printf("Config: %s (edit to add/remove routes)\n", configPath)
+	fmt.Println("-----------------------------------------------------------------------------")
+	if len(config.HTTP.K8s.Routes) == 0 {
+		fmt.Println("Add/remove routes !!!❗️⚠️🔴")
+	}
+	fmt.Printf("Config: %s\n", configPath)
+	fmt.Println("-----------------------------------------------------------------------------")
 	config.LogRoutes()
 
 	// Create manager and server
@@ -129,8 +121,7 @@ func main() {
 		}
 	}()
 
-	fmt.Printf("Ready! Listening on %s\n", config.HTTP.ListenAddr)
-	fmt.Println("Press Ctrl+C to stop")
+	fmt.Printf("Listening on %s\n", config.HTTP.ListenAddr)
 
 	// Wait for signal
 	sig := <-sigChan
