@@ -54,19 +54,19 @@ clean: ## Clean build artifacts
 ## Integration Test Infrastructure (Docker Compose)
 
 integration-up: ## Start KIND cluster and deploy test services (via Docker Compose)
-	docker compose -f docker-compose.test.yml up -d kind
+	docker compose -f tests/integration/docker-compose.test.yml up -d kind
 	@echo "Waiting for cluster to be healthy..."
-	@until docker compose -f docker-compose.test.yml exec kind kubectl --kubeconfig=/output/kubeconfig get nodes >/dev/null 2>&1; do sleep 2; done
-	@docker compose -f docker-compose.test.yml exec kind cat /output/kubeconfig > $(KUBECONFIG)
+	@until docker compose -f tests/integration/docker-compose.test.yml exec kind kubectl --kubeconfig=/output/kubeconfig get nodes >/dev/null 2>&1; do sleep 2; done
+	@docker compose -f tests/integration/docker-compose.test.yml exec kind cat /output/kubeconfig > $(KUBECONFIG)
 	@echo "Integration environment ready!"
 
 integration-down: ## Tear down KIND cluster
-	docker compose -f docker-compose.test.yml exec kind kind delete cluster --name lazyfwd-test 2>/dev/null || true
-	docker compose -f docker-compose.test.yml down -v
+	docker compose -f tests/integration/docker-compose.test.yml exec kind kind delete cluster --name lazyfwd-test 2>/dev/null || true
+	docker compose -f tests/integration/docker-compose.test.yml down -v
 	@rm -f $(KUBECONFIG)
 
 integration-test: ## Run integration tests (via Docker Compose, all-in-one)
-	docker compose -f docker-compose.test.yml run --rm test
+	docker compose -f tests/integration/docker-compose.test.yml run --rm test
 
 ## Release
 
