@@ -78,9 +78,19 @@ func (cw *ConfigWatcher) watchLoop() {
 				return
 			}
 
-			// React to write, create, or chmod events
-			// Create handles vim/editor atomic saves (write to temp, rename)
-			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Chmod) != 0 {
+			// React to write, create, chmod, or rename events
+			// Rename is needed because editors like vim/nano use atomic saves (write temp, rename)
+			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Chmod|fsnotify.Rename) != 0 {
+				// After rename, the old inode is gone - re-watch the file path
+				if event.Op&fsnotify.Rename != 0 {
+					// Small delay to let the new file appear
+					time.Sleep(100 * time.Millisecond)
+					// Remove old watch (may fail if already gone, that's ok)
+					_ = cw.watcher.Remove(cw.configPath)
+					// Add watch for the new file at this path
+					_ = cw.watcher.Add(cw.configPath)
+				}
+
 				debounceMu.Lock()
 				if debounceTimer != nil {
 					debounceTimer.Stop()
