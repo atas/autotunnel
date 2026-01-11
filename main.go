@@ -66,8 +66,6 @@ func main() {
 		}
 
 		fmt.Printf("\nCreated: %s\n", configPath)
-		fmt.Println("\nServer starting with no routes configured.")
-		fmt.Println("Edit the config file to add routes - changes will be auto-reloaded.")
 	}
 
 	// Load configuration
@@ -85,7 +83,12 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
-	fmt.Printf("Config: %s (edit to add/remove routes)\n", configPath)
+	fmt.Println("-----------------------------------------------------------------------------")
+	if len(config.HTTP.K8s.Routes) == 0 {
+		fmt.Println("Add/remove routes !!!❗️⚠️🔴")
+	}
+	fmt.Printf("Config: %s\n", configPath)
+	fmt.Println("-----------------------------------------------------------------------------")
 	config.LogRoutes()
 
 	// Create manager and server
@@ -118,8 +121,7 @@ func main() {
 		}
 	}()
 
-	fmt.Printf("Ready! Listening on %s\n", config.HTTP.ListenAddr)
-	fmt.Println("Press Ctrl+C to stop")
+	fmt.Printf("Listening on %s\n", config.HTTP.ListenAddr)
 
 	// Wait for signal
 	sig := <-sigChan
