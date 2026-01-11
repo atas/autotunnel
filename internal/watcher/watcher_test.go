@@ -306,3 +306,79 @@ http:
 		t.Error("Watcher.Stop() timed out - possible deadlock")
 	}
 }
+
+// TestConfigWatcher_PreservesCliVerbose verifies that CLI --verbose flag is preserved across reloads
+func TestConfigWatcher_PreservesCliVerbose(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "test-config.yaml")
+
+	// Write config WITHOUT verbose flag (defaults to false)
+	initialConfig := `apiVersion: lazyfwd/v1
+http:
+  listen: ":8989"
+  idle_timeout: 60m
+  k8s:
+    routes:
+      test.localhost:
+        context: test
+        namespace: default
+        service: test
+        port: 80
+`
+	if err := os.WriteFile(configPath, []byte(initialConfig), 0644); err != nil {
+		t.Fatalf("Failed to write initial config: %v", err)
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Simulate CLI --verbose flag
+	cfg.Verbose = true
+
+	manager := &mockConfigUpdater{config: cfg}
+
+	// Create watcher with cliVerbose=true (simulating --verbose flag was passed)
+	watcher, err := NewConfigWatcher(configPath, cfg, manager, true)
+	if err != nil {
+		t.Fatalf("Failed to create watcher: %v", err)
+	}
+
+	watcher.Start()
+	defer watcher.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Modify config (still without verbose flag)
+	updatedConfig := `apiVersion: lazyfwd/v1
+http:
+  listen: ":8989"
+  idle_timeout: 60m
+  k8s:
+    routes:
+      updated.localhost:
+        context: test
+        namespace: default
+        service: updated
+        port: 8080
+`
+	if err := os.WriteFile(configPath, []byte(updatedConfig), 0644); err != nil {
+		t.Fatalf("Failed to write updated config: %v", err)
+	}
+
+	// Wait for debounce + processing
+	time.Sleep(800 * time.Millisecond)
+
+	// Verify that Verbose is still true (preserved from CLI flag)
+	currentCfg := manager.getConfig()
+	if !currentCfg.Verbose {
+		t.Error("Expected Verbose to be true after reload (CLI flag should be preserved)")
+	}
+
+	// Also verify the config was actually reloaded
+	_, hasUpdatedRoute := currentCfg.HTTP.K8s.Routes["updated.localhost"]
+	if !hasUpdatedRoute {
+		t.Error("Expected config to be reloaded with new route")
+	}
+}
