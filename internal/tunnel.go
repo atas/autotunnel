@@ -13,7 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 )
@@ -53,9 +53,12 @@ type Tunnel struct {
 	// Configuration
 	hostname   string
 	config     K8sRouteConfig
-	kubeconfig string
 	listenAddr string
 	verbose    bool
+
+	// Shared k8s resources (from Manager)
+	clientset  *kubernetes.Clientset
+	restConfig *rest.Config
 
 	// State
 	state      TunnelState
@@ -71,11 +74,12 @@ type Tunnel struct {
 }
 
 // NewTunnel creates a new tunnel instance
-func NewTunnel(hostname string, config K8sRouteConfig, kubeconfig string, listenAddr string, verbose bool) *Tunnel {
+func NewTunnel(hostname string, config K8sRouteConfig, clientset *kubernetes.Clientset, restConfig *rest.Config, listenAddr string, verbose bool) *Tunnel {
 	return &Tunnel{
 		hostname:   hostname,
 		config:     config,
-		kubeconfig: kubeconfig,
+		clientset:  clientset,
+		restConfig: restConfig,
 		listenAddr: listenAddr,
 		verbose:    verbose,
 		state:      TunnelStateIdle,
@@ -162,37 +166,9 @@ func (t *Tunnel) Scheme() string {
 
 // startPortForward establishes the port-forward connection using client-go
 func (t *Tunnel) startPortForward(ctx context.Context) error {
-	// Step 1: Build REST config for the specific context
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	loadingRules.ExplicitPath = t.kubeconfig
-
-	configOverrides := &clientcmd.ConfigOverrides{
-		CurrentContext: t.config.Context,
-	}
-
-	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		loadingRules,
-		configOverrides,
-	)
-
-	restConfig, err := kubeConfig.ClientConfig()
-	if err != nil {
-		t.mu.Lock()
-		t.lastError = err
-		t.state = TunnelStateFailed
-		t.mu.Unlock()
-		return fmt.Errorf("failed to build REST config: %w", err)
-	}
-
-	// Step 2: Create Kubernetes clientset
-	clientset, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		t.mu.Lock()
-		t.lastError = err
-		t.state = TunnelStateFailed
-		t.mu.Unlock()
-		return fmt.Errorf("failed to create clientset: %w", err)
-	}
+	// Use shared clientset and restConfig from Manager
+	clientset := t.clientset
+	restConfig := t.restConfig
 
 	// Variables to hold the target pod name and port
 	var targetPodName string

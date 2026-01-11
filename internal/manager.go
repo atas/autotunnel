@@ -6,7 +6,17 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
+
+// k8sClient holds a cached Kubernetes clientset and REST config for a context
+type k8sClient struct {
+	clientset  *kubernetes.Clientset
+	restConfig *rest.Config
+}
 
 // Manager handles the lifecycle of all tunnels
 type Manager struct {
@@ -18,6 +28,10 @@ type Manager struct {
 	// Active tunnels keyed by hostname
 	tunnels map[string]*Tunnel
 
+	// Cached k8s clients per context name
+	k8sClients   map[string]*k8sClient
+	k8sClientsMu sync.RWMutex
+
 	// Shutdown coordination
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -28,11 +42,61 @@ type Manager struct {
 func NewManager(config *Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		config:  config,
-		tunnels: make(map[string]*Tunnel),
-		ctx:     ctx,
-		cancel:  cancel,
+		config:     config,
+		tunnels:    make(map[string]*Tunnel),
+		k8sClients: make(map[string]*k8sClient),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
+}
+
+// getClientsetAndConfig returns a cached or newly created k8s client for the given context
+func (m *Manager) getClientsetAndConfig(kubeconfig, contextName string) (*kubernetes.Clientset, *rest.Config, error) {
+	// Try read lock first for cached client
+	m.k8sClientsMu.RLock()
+	if client, ok := m.k8sClients[contextName]; ok {
+		m.k8sClientsMu.RUnlock()
+		return client.clientset, client.restConfig, nil
+	}
+	m.k8sClientsMu.RUnlock()
+
+	// Acquire write lock to create new client
+	m.k8sClientsMu.Lock()
+	defer m.k8sClientsMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if client, ok := m.k8sClients[contextName]; ok {
+		return client.clientset, client.restConfig, nil
+	}
+
+	// Build REST config
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	loadingRules.ExplicitPath = kubeconfig
+	configOverrides := &clientcmd.ConfigOverrides{CurrentContext: contextName}
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+
+	restConfig, err := kubeConfig.ClientConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build REST config for context %s: %w", contextName, err)
+	}
+
+	// Create clientset
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create clientset for context %s: %w", contextName, err)
+	}
+
+	// Cache and return
+	m.k8sClients[contextName] = &k8sClient{
+		clientset:  clientset,
+		restConfig: restConfig,
+	}
+
+	if m.config.Verbose {
+		log.Printf("Created k8s client for context: %s", contextName)
+	}
+
+	return clientset, restConfig, nil
 }
 
 // GetOrCreateTunnel returns an existing tunnel or creates a new one
@@ -56,8 +120,14 @@ func (m *Manager) GetOrCreateTunnel(hostname string) (*Tunnel, error) {
 		return nil, fmt.Errorf("no route configured for hostname: %s", hostname)
 	}
 
-	// Create new tunnel
-	tunnel := NewTunnel(hostname, routeConfig, m.config.HTTP.K8s.Kubeconfig, m.config.HTTP.ListenAddr, m.config.Verbose)
+	// Get or create shared k8s client for this context
+	clientset, restConfig, err := m.getClientsetAndConfig(m.config.HTTP.K8s.Kubeconfig, routeConfig.Context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get k8s client for context %s: %w", routeConfig.Context, err)
+	}
+
+	// Create new tunnel with shared k8s resources
+	tunnel := NewTunnel(hostname, routeConfig, clientset, restConfig, m.config.HTTP.ListenAddr, m.config.Verbose)
 	m.tunnels[hostname] = tunnel
 
 	return tunnel, nil
@@ -84,6 +154,11 @@ func (m *Manager) Shutdown() {
 	}
 	m.tunnels = make(map[string]*Tunnel)
 	m.mu.Unlock()
+
+	// Clear cached k8s clients
+	m.k8sClientsMu.Lock()
+	m.k8sClients = make(map[string]*k8sClient)
+	m.k8sClientsMu.Unlock()
 
 	m.wg.Wait()
 	log.Println("Tunnel manager stopped")
