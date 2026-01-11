@@ -7,7 +7,7 @@
 ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝      ╚══╝╚══╝ ╚═════╝ ╚═╝    ╚═╝
 ```
 
-# lazyfwd - On-Demand Port Forwarder
+# lazyfwd >> On-Demand Port Forwarder
 
 A lightweight, on-demand port-forwarding proxy. Tunnels are created lazily when traffic arrives to the local port and torn down after an idle timeout. Currently supports Kubernetes services and pods.
 

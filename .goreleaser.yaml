@@ -51,7 +51,7 @@ changelog:
          - "Merge pull request"
          - "Merge branch"
 
-brews:
+homebrew_casks:
    - name: lazyfwd
      repository:
         owner: atas
@@ -59,15 +59,8 @@ brews:
         token: "{{ .Env.TAP_GITHUB_TOKEN }}"
      homepage: "https://github.com/atas/lazyfwd"
      description: "On-demand Kubernetes port forwarding proxy"
-     license: "MIT"
-     install: |
-        bin.install "lazyfwd"
-     service: |
-        run [opt_bin/"lazyfwd"]
-        keep_alive true
-        log_path var/"log/lazyfwd.log"
-        error_log_path var/"log/lazyfwd.log"
-        working_dir var
+     binaries:
+        - lazyfwd
      caveats: |
         To run lazyfwd as a background service:
           brew services start lazyfwd
@@ -80,6 +73,25 @@ brews:
 
         ⚠️ After running, edit the created 🔴 ~/.lazyfwd.yaml and add your routes!!! ‼️
         Route changes will be picked up automatically.
+
+     # Remove macOS quarantine for unsigned binaries
+     hooks:
+        post:
+           install: |
+              system_command "/usr/bin/xattr",
+                args: ["-dr", "com.apple.quarantine", "#{staged_path}/lazyfwd"]
+
+     # Service definition for brew services
+     service: contrib/lazyfwd.plist
+
+     # Cleanup on uninstall
+     uninstall:
+        launchctl:
+           - com.atas.lazyfwd
+
+     zap:
+        trash:
+           - "~/.lazyfwd.yaml"
 
 release:
    github:
