@@ -54,7 +54,7 @@ brew services list             # Check status
 </details>
 
 #### Logs:
-Logs: `/opt/homebrew/var/log/lazyfwd.log` (Apple Silicon) or `/usr/local/var/log/lazyfwd.log` (Intel)
+Logs: `tail -f $(brew --prefix)/var/log/lazyfwd.log`
 
 <details>
 <summary><strong>Linux (systemd)</strong></summary>
