@@ -53,7 +53,7 @@ services:
       start_period: 90s
 
   test:
-    image: golang:1.22-alpine
+    image: golang:1.25-alpine
     depends_on:
       kind:
         condition: service_healthy
