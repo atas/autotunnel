@@ -24,11 +24,25 @@ A lightweight, on-demand port-forwarding proxy. Tunnels are created lazily when 
 
 ## Installation
 
-### Homebrew (macOS/Linux)
+### Homebrew (macOS)
 
 ```bash
-brew install atas/tap/lazyfwd
+brew install --cask atas/tap/lazyfwd
 ```
+
+<details>
+<summary><strong>Linux</strong></summary>
+
+```bash
+# Download latest release
+curl -LO https://github.com/atas/lazyfwd/releases/latest/download/lazyfwd_linux_amd64.tar.gz
+tar xzf lazyfwd_linux_amd64.tar.gz
+sudo mv lazyfwd /usr/local/bin/
+# Or use go install
+go install github.com/atas/lazyfwd@latest
+```
+
+</details>
 
 ### Running as a Background Service
 
@@ -54,7 +68,9 @@ brew services list             # Check status
 </details>
 
 #### Logs:
-Logs: `/opt/homebrew/var/log/lazyfwd.log` (Apple Silicon) or `/usr/local/var/log/lazyfwd.log` (Intel)
+```bash
+tail -f $(brew --prefix)/var/log/lazyfwd.log
+```
 
 <details>
 <summary><strong>Linux (systemd)</strong></summary>
