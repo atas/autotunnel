@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/atas/lazyfwd/internal"
+	"github.com/atas/lazyfwd/internal/tunnel"
 )
 
 // GetOrCreateTunnel returns an existing tunnel or creates a new one
@@ -36,10 +36,10 @@ func (m *Manager) GetOrCreateTunnel(hostname string) (TunnelHandle, error) {
 	}
 
 	// Create new tunnel with shared k8s resources
-	tunnel := internal.NewTunnel(hostname, routeConfig, clientset, restConfig, m.config.HTTP.ListenAddr, m.config.Verbose)
-	m.tunnels[hostname] = tunnel
+	tun := tunnel.NewTunnel(hostname, routeConfig, clientset, restConfig, m.config.HTTP.ListenAddr, m.config.Verbose)
+	m.tunnels[hostname] = tun
 
-	return tunnel, nil
+	return tun, nil
 }
 
 // idleCleanupLoop periodically checks for and closes idle tunnels

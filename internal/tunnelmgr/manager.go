@@ -6,8 +6,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/atas/lazyfwd/internal"
 	"github.com/atas/lazyfwd/internal/config"
+	"github.com/atas/lazyfwd/internal/tunnel"
 )
 
 // Manager handles the lifecycle of all tunnels
@@ -18,7 +18,7 @@ type Manager struct {
 	config *config.Config
 
 	// Active tunnels keyed by hostname
-	tunnels map[string]*internal.Tunnel
+	tunnels map[string]*tunnel.Tunnel
 
 	// Cached k8s clients per context name
 	k8sClients   map[string]*k8sClient
@@ -35,7 +35,7 @@ func NewManager(cfg *config.Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		config:     cfg,
-		tunnels:    make(map[string]*internal.Tunnel),
+		tunnels:    make(map[string]*tunnel.Tunnel),
 		k8sClients: make(map[string]*k8sClient),
 		ctx:        ctx,
 		cancel:     cancel,
@@ -61,7 +61,7 @@ func (m *Manager) Shutdown() {
 			tunnel.Stop()
 		}
 	}
-	m.tunnels = make(map[string]*internal.Tunnel)
+	m.tunnels = make(map[string]*tunnel.Tunnel)
 	m.mu.Unlock()
 
 	// Clear cached k8s clients

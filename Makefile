@@ -1,4 +1,4 @@
-.PHONY: build build-all test test-race test-integration test-all run lint fmt tidy clean \
+.PHONY: build build-all test test-race test-integration test-all run vet lint fmt tidy clean \
         integration-up integration-down integration-test release-snapshot help
 
 # Variables
@@ -35,7 +35,10 @@ test-all: test integration-up test-integration integration-down ## Run all tests
 run: build ## Build and run with example config
 	./$(BINARY_NAME) --config example-config.yaml --verbose
 
-lint: ## Run golangci-lint
+vet: ## Run go vet
+	go vet ./...
+
+lint: vet ## Run go vet + golangci-lint
 	golangci-lint run ./...
 
 fmt: ## Format code
