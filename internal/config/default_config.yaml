@@ -22,9 +22,8 @@ http:
 
   k8s:
     # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
-    # If not set: uses $KUBECONFIG env var, or defaults to ~/.kube/config
-    # Note: $KUBECONFIG is NOT available when running as brew service (launchd limitation)
-    # kubeconfig: ~/.kube/config
+    # Tries to use $KUBECONFIG env var as well but that's not available in the brew service
+    # then defaults to ~/.kube/config
     # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
     routes:

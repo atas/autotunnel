@@ -7,7 +7,7 @@
 ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝      ╚══╝╚══╝ ╚═════╝ ╚═╝    ╚═╝
 ```
 
-# lazyfwd - On-Demand Port Forwarder
+# lazyfwd - Lazy (_On-Demand_) Port Forwarder & Tunnel
 
 A lightweight, on-demand port-forwarding proxy. Tunnels are created lazily when traffic arrives to the local port and torn down after an idle timeout. Currently supports Kubernetes services and pods.
 
@@ -169,16 +169,25 @@ apiVersion: lazyfwd/v1
 
 # verbose: true  # Enable verbose logging (or use --verbose flag)
 
+# Auto-reload on file changes (disable requires: brew services restart lazyfwd)
+auto_reload_config: true
+
+# Additional paths for exec credential plugins (e.g., aws-iam-authenticator, gcloud)
+# Common paths (/usr/local/bin, /opt/homebrew/bin, etc.) are added automatically.
+# exec_path:
+#   - /custom/path/to/binaries
+
 http:
   # Listen address (handles both HTTP and HTTPS on same port)
-  listen: ":8989"
+  listen: ":8989"  # Port changes require: brew services restart lazyfwd
 
   # Idle timeout before closing tunnels (Go duration format)
   idle_timeout: 60m
 
   k8s:
-    # Path to kubeconfig (optional, defaults to ~/.kube/config)
-    # kubeconfig: ~/.kube/config
+    # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
+    # Defaults to ~/.kube/config
+    # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
     routes:
       # Route via service (discovers pod automatically)
