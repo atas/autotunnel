@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Build
+        run: go build -v ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=3m
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Create KIND cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: lazyfwd-test
+
+      - name: Deploy test services
+        run: kubectl apply -f tests/integration/manifests/
+
+      - name: Wait for pods
+        run: |
+          kubectl wait --for=condition=ready pod -l app=nginx -n lazyfwd-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=echo -n lazyfwd-test --timeout=120s
+
+      - name: Build binary
+        run: go build -o lazyfwd .
+
+      - name: Run integration tests
+        run: go test -v -tags=integration ./tests/integration/...
+        env:
+          K8S_CONTEXT: kind-lazyfwd-test
+
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name lazyfwd-test || true

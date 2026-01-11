@@ -1,0 +1,79 @@
+services:
+  kind:
+    build:
+      context: ./tests/integration
+      dockerfile: Dockerfile.kind
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./tests/integration/manifests:/manifests:ro
+      - kubeconfig:/output
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Clean up any existing cluster
+        kind delete cluster --name lazyfwd-test 2>/dev/null || true
+
+        # Create KIND cluster
+        kind create cluster --name lazyfwd-test --wait 120s
+
+        # Export kubeconfig
+        kind get kubeconfig --name lazyfwd-test > /output/kubeconfig
+
+        # Fix kubeconfig to use the Docker network IP instead of localhost
+        # Get the control plane container IP
+        CONTROL_PLANE_IP=$$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' lazyfwd-test-control-plane)
+        sed -i "s/127.0.0.1:[0-9]*/$$CONTROL_PLANE_IP:6443/g" /output/kubeconfig
+
+        echo "Waiting for cluster to be ready..."
+        until kubectl --kubeconfig=/output/kubeconfig get nodes >/dev/null 2>&1; do
+          echo "Waiting for API server..."
+          sleep 2
+        done
+
+        # Apply test manifests
+        echo "Applying test manifests..."
+        kubectl --kubeconfig=/output/kubeconfig apply -f /manifests/
+
+        # Wait for pods to be ready
+        echo "Waiting for nginx pod..."
+        kubectl --kubeconfig=/output/kubeconfig wait --for=condition=ready pod -l app=nginx -n lazyfwd-test --timeout=180s
+        echo "Waiting for echo pod..."
+        kubectl --kubeconfig=/output/kubeconfig wait --for=condition=ready pod -l app=echo -n lazyfwd-test --timeout=180s
+
+        echo "Cluster ready!"
+        tail -f /dev/null
+    healthcheck:
+      test: ["CMD", "sh", "-c", "kubectl --kubeconfig=/output/kubeconfig get nodes 2>/dev/null | grep -q Ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  test:
+    image: golang:1.22-alpine
+    depends_on:
+      kind:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - kubeconfig:/kubeconfig:ro
+      - go-cache:/go/pkg
+    working_dir: /app
+    environment:
+      - KUBECONFIG=/kubeconfig/kubeconfig
+      - K8S_CONTEXT=kind-lazyfwd-test
+      - CGO_ENABLED=0
+    command: >
+      sh -c "
+        echo 'Building lazyfwd...' &&
+        go build -o lazyfwd . &&
+        echo 'Running integration tests...' &&
+        go test -v -tags=integration ./tests/integration/...
+      "
+
+volumes:
+  kubeconfig:
+  go-cache:

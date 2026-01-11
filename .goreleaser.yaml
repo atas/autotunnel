@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: lazyfwd
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: lazyfwd
+    main: .
+    binary: lazyfwd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - src: contrib/lazyfwd.service
+        dst: .
+        strip_parent: true
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+
+brews:
+  - name: lazyfwd
+    repository:
+      owner: atas
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/atas/lazyfwd"
+    description: "On-demand Kubernetes port forwarding proxy"
+    license: "MIT"
+    install: |
+      bin.install "lazyfwd"
+    service: |
+      run [opt_bin/"lazyfwd"]
+      keep_alive true
+      log_path var/"log/lazyfwd.log"
+      error_log_path var/"log/lazyfwd.log"
+      working_dir var
+
+release:
+  github:
+    owner: atas
+    name: lazyfwd
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"

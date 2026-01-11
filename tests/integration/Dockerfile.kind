@@ -1,0 +1,13 @@
+# KIND-based Kubernetes test environment
+FROM docker:27-cli
+
+# Install KIND, kubectl, and bash
+RUN apk add --no-cache curl bash && \
+    # Install KIND
+    curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.25.0/kind-linux-amd64 && \
+    chmod +x /usr/local/bin/kind && \
+    # Install kubectl
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    chmod +x kubectl && mv kubectl /usr/local/bin/
+
+ENTRYPOINT ["/bin/sh", "-c"]
