@@ -85,7 +85,7 @@ homebrew_casks:
                 args: ["-dr", "com.apple.quarantine", "#{staged_path}/lazyfwd"]
 
      # Service definition for brew services
-     service: contrib/lazyfwd.plist
+     service: lazyfwd.plist
 
      # Cleanup on uninstall
      uninstall:
