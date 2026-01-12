@@ -9,18 +9,24 @@
 
 # autotunnel - On-Demand Port Forwarder & Tunnel
 
-A lightweight, auto and on-demand (lazy) port-forwarding proxy. Tunnels are created lazily when traffic arrives to the local port and torn down after an idle timeout. Currently supports Kubernetes services and pods.
+A lightweight, auto and on-demand (lazy) port-forwarding proxy to Kubernetes. Tunnels are created lazily when traffic arrives to the local port and torn down after an idle timeout. Currently supports Kubernetes services and pods.
 
-## Features
+## Summary
 
-- **On-demand port-forwarding**: Tunnels are created only when traffic arrives
-- **Automatic cleanup**: Tunnels close after configurable idle timeout
-- **Single binary**: No external dependencies at runtime
-- **Native Kubernetes client**: Uses client-go (not kubectl subprocess)
-- **Multi-context support**: Different services can use different Kubernetes contexts
-- **Host-based routing**: Single port serves multiple services based on Host header or TLS SNI
-- **TLS passthrough**: HTTPS services work without certificate management
-- **Graceful shutdown**: Clean tunnel teardown on SIGINT/SIGTERM
+Connect to Kubernetes services and pods with friendly URLs automatically:
+
+* `https://argocd.localhost:8989` — Pre-configured route
+* `http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989` — Dynamic routing (no config needed)
+
+### Features
+
+* **On-demand tunneling** - port-forwards are created automatically when traffic arrives
+* **HTTP and HTTPS support** - HTTP reverse proxy with `X-Forwarded-*` headers, TLS passthrough for HTTPS
+* **K8s Services and Pods** - target either directly or let it discover pods via service selectors
+* **Protocol multiplexing** - serve both HTTP and HTTPS on a single port
+* **Idle cleanup** - tunnels automatically close after configurable idle timeout
+* **Native client-go** - uses Kubernetes client library directly (no kubectl subprocess)
+
 
 ## Installation
 
