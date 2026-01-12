@@ -61,6 +61,7 @@ https://github.com/atas/autotunnel`)
 
 	// Check if config exists, create default if not
 	if !config.ConfigExists(configPath) {
+		fmt.Println("-----------------------------------------------------------------------------")
 		fmt.Printf("Config file not found, creating: %s\n", configPath)
 
 		if err := config.CreateDefaultConfig(configPath); err != nil {
