@@ -2,8 +2,8 @@
         run vet lint fmt tidy clean kind-up kind-down release-snapshot help
 
 # Variables
-BINARY_NAME := lazyfwd
-KIND_CLUSTER := lazyfwd-test
+BINARY_NAME := autotunnel
+KIND_CLUSTER := autotunnel-test
 KUBECONFIG := $(shell pwd)/.kubeconfig-test
 
 # Default target
@@ -31,7 +31,7 @@ test-integration-ci: build ## Run integration tests (CI - assumes KIND cluster a
 test-integration-local: ## Run integration tests locally (Docker-based KIND, auto-cleanup)
 	@docker compose -f tests/integration/docker-compose.test.yml up --abort-on-container-exit --exit-code-from test; \
 	ret=$$?; \
-	docker rm -f $$(docker ps -aq --filter "name=lazyfwd-test-") 2>/dev/null || true; \
+	docker rm -f $$(docker ps -aq --filter "name=autotunnel-test-") 2>/dev/null || true; \
 	docker compose -f tests/integration/docker-compose.test.yml down; \
 	exit $$ret
 
@@ -68,7 +68,7 @@ kind-up: ## Start KIND cluster in Docker (for debugging)
 	@echo "KIND cluster ready!"
 
 kind-down: ## Tear down KIND cluster
-	docker compose -f tests/integration/docker-compose.test.yml exec kind kind delete cluster --name lazyfwd-test 2>/dev/null || true
+	docker compose -f tests/integration/docker-compose.test.yml exec kind kind delete cluster --name autotunnel-test 2>/dev/null || true
 	docker compose -f tests/integration/docker-compose.test.yml down -v
 	@rm -f $(KUBECONFIG)
 

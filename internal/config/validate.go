@@ -7,7 +7,7 @@ import "fmt"
 func (c *Config) Validate() error {
 	// Allow empty apiVersion (defaults to current), but reject wrong versions
 	if c.ApiVersion != "" && c.ApiVersion != CurrentApiVersion {
-		return fmt.Errorf("unsupported config apiVersion %q (this version of lazyfwd requires %q)", c.ApiVersion, CurrentApiVersion)
+		return fmt.Errorf("unsupported config apiVersion %q (this version of autotunnel requires %q)", c.ApiVersion, CurrentApiVersion)
 	}
 
 	if c.HTTP.ListenAddr == "" {

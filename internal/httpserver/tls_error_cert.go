@@ -36,8 +36,8 @@ func newTLSErrorCertProvider() (*tlsErrorCertProvider, error) {
 	caTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			Organization: []string{"lazyfwd Error CA"},
-			CommonName:   "lazyfwd Error Certificate Authority",
+			Organization: []string{"autotunnel Error CA"},
+			CommonName:   "autotunnel Error Certificate Authority",
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // 1 year
@@ -102,7 +102,7 @@ func (p *tlsErrorCertProvider) generateCert(hostname string) (*tls.Certificate, 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject: pkix.Name{
-			Organization: []string{"lazyfwd Error Page"},
+			Organization: []string{"autotunnel Error Page"},
 			CommonName:   hostname,
 		},
 		DNSNames:    []string{hostname},

@@ -3,14 +3,14 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: lazyfwd-test
+  name: autotunnel-test
 ---
 # Simple nginx deployment for testing HTTP port-forwarding
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
   labels:
     app: nginx
 spec:
@@ -40,7 +40,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nginx
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
 spec:
   selector:
     app: nginx
@@ -53,7 +53,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: echo
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
   labels:
     app: echo
 spec:
@@ -70,7 +70,7 @@ spec:
         - name: echo
           image: hashicorp/http-echo
           args:
-            - "-text=lazyfwd-integration-test"
+            - "-text=autotunnel-integration-test"
             - "-listen=:8080"
           ports:
             - containerPort: 8080
@@ -86,7 +86,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: echo
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
 spec:
   selector:
     app: echo
@@ -103,7 +103,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nginx-tls-config
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
 data:
   nginx.conf: |
     events { worker_connections 1024; }
@@ -115,7 +115,7 @@ data:
             ssl_certificate_key /etc/nginx/ssl/tls.key;
             ssl_protocols TLSv1.2 TLSv1.3;
             location / {
-                return 200 'lazyfwd-tls-integration-test\n';
+                return 200 'autotunnel-tls-integration-test\n';
                 add_header Content-Type text/plain;
             }
             location /health { return 200 'OK'; }
@@ -127,7 +127,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx-tls
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
   labels:
     app: nginx-tls
 spec:
@@ -184,7 +184,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nginx-tls
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
 spec:
   selector:
     app: nginx-tls
@@ -197,7 +197,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: echo-named-ports
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
   labels:
     app: echo-named-ports
 spec:
@@ -229,7 +229,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: echo-named-ports
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
 spec:
   selector:
     app: echo-named-ports
@@ -243,7 +243,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: multi-port
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
   labels:
     app: multi-port
 spec:
@@ -287,7 +287,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: multi-port
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
 spec:
   selector:
     app: multi-port
@@ -307,7 +307,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: websocket-echo
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
   labels:
     app: websocket-echo
 spec:
@@ -337,7 +337,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: websocket-echo
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
 spec:
   selector:
     app: websocket-echo
@@ -350,7 +350,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: standalone-pod
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
   labels:
     app: standalone-pod
 spec:
@@ -373,7 +373,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: echo-headers
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
   labels:
     app: echo-headers
 spec:
@@ -406,7 +406,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: echo-headers
-  namespace: lazyfwd-test
+  namespace: autotunnel-test
 spec:
   selector:
     app: echo-headers

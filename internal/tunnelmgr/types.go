@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/atas/lazyfwd/internal/tunnel"
+	"github.com/atas/autotunnel/internal/tunnel"
 )
 
 // TunnelHandle provides access to tunnel operations needed by the HTTP server and manager

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/atas/lazyfwd/internal/config"
-	"github.com/atas/lazyfwd/internal/tunnelmgr"
+	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/tunnelmgr"
 )
 
 // Manager provides tunnel lifecycle management

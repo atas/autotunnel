@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/atas/lazyfwd/internal/config"
+	"github.com/atas/autotunnel/internal/config"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )

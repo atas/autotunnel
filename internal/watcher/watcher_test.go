@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/atas/lazyfwd/internal/config"
+	"github.com/atas/autotunnel/internal/config"
 )
 
 // mockConfigUpdater implements ConfigUpdater for testing
@@ -35,7 +35,7 @@ func TestConfigWatcher_DetectsFileChanges(t *testing.T) {
 	configPath := filepath.Join(tempDir, "test-config.yaml")
 
 	// Write initial config
-	initialConfig := `apiVersion: lazyfwd/v1
+	initialConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m
@@ -73,7 +73,7 @@ http:
 	time.Sleep(100 * time.Millisecond)
 
 	// Modify config file (direct write)
-	updatedConfig := `apiVersion: lazyfwd/v1
+	updatedConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m
@@ -112,7 +112,7 @@ func TestConfigWatcher_DetectsAtomicRename(t *testing.T) {
 	configPath := filepath.Join(tempDir, "test-config.yaml")
 
 	// Write initial config
-	initialConfig := `apiVersion: lazyfwd/v1
+	initialConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m
@@ -147,7 +147,7 @@ http:
 
 	// Simulate atomic save (like vim/nano do): write to temp file, then rename
 	tempFile := filepath.Join(tempDir, "test-config.yaml.tmp")
-	atomicConfig := `apiVersion: lazyfwd/v1
+	atomicConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m
@@ -191,7 +191,7 @@ func TestConfigWatcher_InvalidConfigKeepsCurrent(t *testing.T) {
 	configPath := filepath.Join(tempDir, "test-config.yaml")
 
 	// Write valid initial config
-	initialConfig := `apiVersion: lazyfwd/v1
+	initialConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m
@@ -225,7 +225,7 @@ http:
 	time.Sleep(100 * time.Millisecond)
 
 	// Write invalid config (missing required fields)
-	invalidConfig := `apiVersion: lazyfwd/v1
+	invalidConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m
@@ -261,7 +261,7 @@ func TestConfigWatcher_StopGracefully(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "test-config.yaml")
 
-	initialConfig := `apiVersion: lazyfwd/v1
+	initialConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m
@@ -313,7 +313,7 @@ func TestConfigWatcher_PreservesCliVerbose(t *testing.T) {
 	configPath := filepath.Join(tempDir, "test-config.yaml")
 
 	// Write config WITHOUT verbose flag (defaults to false)
-	initialConfig := `apiVersion: lazyfwd/v1
+	initialConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m
@@ -351,7 +351,7 @@ http:
 	time.Sleep(100 * time.Millisecond)
 
 	// Modify config (still without verbose flag)
-	updatedConfig := `apiVersion: lazyfwd/v1
+	updatedConfig := `apiVersion: autotunnel/v1
 http:
   listen: ":8989"
   idle_timeout: 60m

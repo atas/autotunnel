@@ -1,0 +1,13 @@
+[Unit]
+Description=autotunnel - On-demand Kubernetes port forwarding
+Documentation=https://github.com/atas/autotunnel
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/autotunnel
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

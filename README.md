@@ -7,7 +7,7 @@
 ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝      ╚══╝╚══╝ ╚═════╝ ╚═╝    ╚═╝
 ```
 
-# lazyfwd - Lazy (_On-Demand_) Port Forwarder & Tunnel
+# autotunnel - Lazy (_On-Demand_) Port Forwarder & Tunnel
 
 A lightweight, on-demand port-forwarding proxy. Tunnels are created lazily when traffic arrives to the local port and torn down after an idle timeout. Currently supports Kubernetes services and pods.
 
@@ -27,34 +27,34 @@ A lightweight, on-demand port-forwarding proxy. Tunnels are created lazily when 
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install atas/tap/lazyfwd
+brew install atas/tap/autotunnel
 ```
 
 ### Running as a Background Service
 
 **macOS (via Homebrew):**
 ```bash
-brew services start lazyfwd    # Start and enable auto-start on login
+brew services start autotunnel    # Start and enable auto-start on login
 # Or run manually
-# lazyfwd
+# autotunnel
 ```
 
-**After starting it, edit the created config file `~/.lazyfwd.yaml` with an editor to add your routes.**
+**After starting it, edit the created config file `~/.autotunnel.yaml` with an editor to add your routes.**
 
 <details>
 <summary><strong>Other useful commands</strong></summary>
 
 ```bash
-brew services stop lazyfwd     # Stop the service
-brew services info lazyfwd     # Show information about the service
-brew services restart lazyfwd  # Restart the service
+brew services stop autotunnel     # Stop the service
+brew services info autotunnel     # Show information about the service
+brew services restart autotunnel  # Restart the service
 brew services list             # Check status
 ```
 
 </details>
 
 #### Logs:
-Logs: `tail -f $(brew --prefix)/var/log/lazyfwd.log`
+Logs: `tail -f $(brew --prefix)/var/log/autotunnel.log`
 
 <details>
 <summary><strong>Linux (systemd)</strong></summary>
@@ -62,15 +62,15 @@ Logs: `tail -f $(brew --prefix)/var/log/lazyfwd.log`
 ```bash
 # Copy the service file (included in release archives)
 mkdir -p ~/.config/systemd/user
-cp lazyfwd.service ~/.config/systemd/user/
+cp autotunnel.service ~/.config/systemd/user/
 
 # Enable and start
 systemctl --user daemon-reload
-systemctl --user enable --now lazyfwd
+systemctl --user enable --now autotunnel
 
 # Check status and logs
-systemctl --user status lazyfwd
-journalctl --user -u lazyfwd -f
+systemctl --user status autotunnel
+journalctl --user -u autotunnel -f
 ```
 
 </details>
@@ -78,26 +78,26 @@ journalctl --user -u lazyfwd -f
 ### Go Install
 
 ```bash
-go install github.com/atas/lazyfwd@latest
+go install github.com/atas/autotunnel@latest
 ```
 
 ### Download Binary
 
-Download the latest release from the [releases page](https://github.com/atas/lazyfwd/releases).
+Download the latest release from the [releases page](https://github.com/atas/autotunnel/releases).
 
 ## Quick Start
 
-1. Run lazyfwd once to generate a default config:
+1. Run autotunnel once to generate a default config:
 
 ```bash
-lazyfwd
-# Creates ~/.lazyfwd.yaml with example configuration
+autotunnel
+# Creates ~/.autotunnel.yaml with example configuration
 ```
 
-2. Edit `~/.lazyfwd.yaml` with your services:
+2. Edit `~/.autotunnel.yaml` with your services:
 
 ```yaml
-apiVersion: lazyfwd/v1
+apiVersion: autotunnel/v1
 
 http:
   listen: ":8989"
@@ -121,10 +121,10 @@ http:
         port: 80
 ```
 
-3. Run lazyfwd:
+3. Run autotunnel:
 
 ```bash
-lazyfwd
+autotunnel
 ```
 
 4. Access your services:
@@ -141,20 +141,20 @@ curl http://grafana.localhost:8989/
 
 ```mermaid
 flowchart LR
-    Client[HTTP Request<br/>Host: app.local:8989] --> lazyfwd
+    Client[HTTP Request<br/>Host: app.local:8989] --> autotunnel
 
-    subgraph lazyfwd[lazyfwd:8989]
+    subgraph autotunnel[autotunnel:8989]
         direction TB
         A[1. Extract Host] --> B[2. Lookup route]
         B --> C[3. Create tunnel]
         C --> D[4. Reverse proxy]
     end
 
-    lazyfwd -->|port-forward<br/>client-go| Pod[Kubernetes Pod]
+    autotunnel -->|port-forward<br/>client-go| Pod[Kubernetes Pod]
 ```
 
 1. User configures hostname → K8s service/pod mappings in YAML config
-2. lazyfwd listens on a single local port (e.g., 8989)
+2. autotunnel listens on a single local port (e.g., 8989)
 3. When a request arrives, it inspects the `Host` header (HTTP) or SNI (TLS)
 4. If no tunnel exists for that host, it creates a port-forward using client-go
 5. It reverse-proxies the request through the tunnel
@@ -162,14 +162,14 @@ flowchart LR
 
 ## Configuration
 
-Configuration file location: `~/.lazyfwd.yaml` (or specify with `--config`)
+Configuration file location: `~/.autotunnel.yaml` (or specify with `--config`)
 
 ```yaml
-apiVersion: lazyfwd/v1
+apiVersion: autotunnel/v1
 
 # verbose: true  # Enable verbose logging (or use --verbose flag)
 
-# Auto-reload on file changes (disable requires: brew services restart lazyfwd)
+# Auto-reload on file changes (disable requires: brew services restart autotunnel)
 auto_reload_config: true
 
 # Additional paths for exec credential plugins (e.g., aws-iam-authenticator, gcloud)
@@ -179,7 +179,7 @@ auto_reload_config: true
 
 http:
   # Listen address (handles both HTTP and HTTPS on same port)
-  listen: ":8989"  # Port changes require: brew services restart lazyfwd
+  listen: ":8989"  # Port changes require: brew services restart autotunnel
 
   # Idle timeout before closing tunnels (Go duration format)
   idle_timeout: 60m
@@ -220,7 +220,7 @@ Each route requires either `service` or `pod` (mutually exclusive):
 | ----------- | ----------------------------------------------------------- |
 | `context`   | Kubernetes context name from kubeconfig                     |
 | `namespace` | Kubernetes namespace                                        |
-| `service`   | Service name (lazyfwd discovers a ready pod)                |
+| `service`   | Service name (autotunnel discovers a ready pod)                |
 | `pod`       | Pod name (direct targeting, no discovery)                   |
 | `port`      | Service or pod port                                         |
 | `scheme`    | `http` (default) or `https` - sets X-Forwarded-Proto header |
@@ -228,11 +228,11 @@ Each route requires either `service` or `pod` (mutually exclusive):
 ## CLI Options
 
 ```
-Usage: lazyfwd [options]
+Usage: autotunnel [options]
 
 Options:
   -config string
-        Path to configuration file (default "~/.lazyfwd.yaml")
+        Path to configuration file (default "~/.autotunnel.yaml")
   -verbose
         Enable verbose logging
   -version
@@ -241,7 +241,7 @@ Options:
 
 ## Using with *.localhost
 
-On most systems, `*.localhost` resolves to `127.0.0.1` automatically. This makes it easy to use lazyfwd without modifying `/etc/hosts`:
+On most systems, `*.localhost` resolves to `127.0.0.1` automatically. This makes it easy to use autotunnel without modifying `/etc/hosts`:
 
 ```yaml
 http:
@@ -267,7 +267,7 @@ For custom hostnames, add entries to `/etc/hosts`:
 ### Building
 
 ```bash
-go build -o lazyfwd .
+go build -o autotunnel .
 ```
 
 ### Running Tests

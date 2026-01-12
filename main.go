@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/atas/lazyfwd/internal/config"
-	"github.com/atas/lazyfwd/internal/httpserver"
-	"github.com/atas/lazyfwd/internal/tunnelmgr"
-	"github.com/atas/lazyfwd/internal/watcher"
+	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/httpserver"
+	"github.com/atas/autotunnel/internal/tunnelmgr"
+	"github.com/atas/autotunnel/internal/watcher"
 )
 
 var (
@@ -30,7 +30,7 @@ func main() {
 	var showVersion bool
 
 	home, _ := os.UserHomeDir()
-	defaultConfig := filepath.Join(home, ".lazyfwd.yaml")
+	defaultConfig := filepath.Join(home, ".autotunnel.yaml")
 
 	flag.StringVar(&configPath, "config", defaultConfig, "Path to configuration file")
 	flag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
@@ -38,7 +38,7 @@ func main() {
 	flag.Parse()
 
 	if showVersion {
-		fmt.Printf("lazyfwd version %s (commit: %s, built: %s)\n", version, commit, date)
+		fmt.Printf("autotunnel version %s (commit: %s, built: %s)\n", version, commit, date)
 		return
 	}
 
@@ -53,11 +53,11 @@ func main() {
 
 On-demand Port Forwarding
 ⭐🌟⭐ Please give the repo a star if useful ⭐🌟⭐
-https://github.com/atas/lazyfwd`)
+https://github.com/atas/autotunnel`)
 
 	// Configure logging
 	log.SetFlags(log.Ldate | log.Ltime)
-	log.SetPrefix("[lazyfwd] ")
+	log.SetPrefix("[autotunnel] ")
 
 	// Check if config exists, create default if not
 	if !config.ConfigExists(configPath) {

@@ -1,4 +1,4 @@
-module github.com/atas/lazyfwd
+module github.com/atas/autotunnel
 
 go 1.22
 
