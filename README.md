@@ -60,7 +60,10 @@ brew services list             # Check status
 </details>
 
 #### Logs:
-Logs: `tail -f $(brew --prefix)/var/log/autotunnel.log`
+Logs: 
+```bash
+tail -f $(brew --prefix)/var/log/autotunnel.log
+```
 
 <details>
 <summary><strong>Linux (systemd)</strong></summary>
