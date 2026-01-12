@@ -23,10 +23,10 @@ import (
 )
 
 const (
-	proxyAddr    = "localhost:18989" // Use non-standard port to avoid conflicts
-	testTimeout  = 60 * time.Second
-	startupWait  = 3 * time.Second
-	idleTimeout  = "10s" // Short idle timeout for testing
+	proxyAddr   = "localhost:18989" // Use non-standard port to avoid conflicts
+	testTimeout = 60 * time.Second
+	startupWait = 3 * time.Second
+	idleTimeout = "10s" // Short idle timeout for testing
 )
 
 // getTestContext returns the Kubernetes context to use for tests.
@@ -43,14 +43,14 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// startOPF starts the lazyfwd binary with a test configuration
+// startOPF starts the autotunnel binary with a test configuration
 func startOPF(t *testing.T, configPath string) (*exec.Cmd, func()) {
 	t.Helper()
 
 	// Find the binary (should be built by Makefile)
-	binaryPath := filepath.Join("..", "..", "lazyfwd")
+	binaryPath := filepath.Join("..", "..", "autotunnel")
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		t.Fatalf("lazyfwd binary not found at %s - run 'make build' first", binaryPath)
+		t.Fatalf("autotunnel binary not found at %s - run 'make build' first", binaryPath)
 	}
 
 	cmd := exec.Command(binaryPath, "--config", configPath, "--verbose")
@@ -58,7 +58,7 @@ func startOPF(t *testing.T, configPath string) (*exec.Cmd, func()) {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("Failed to start lazyfwd: %v", err)
+		t.Fatalf("Failed to start autotunnel: %v", err)
 	}
 
 	// Wait for startup
@@ -85,7 +85,7 @@ func writeTestConfig(t *testing.T, services map[string]serviceConfig) string {
 
 	// Build config content in new format
 	var sb strings.Builder
-	sb.WriteString("apiVersion: lazyfwd/v1\n")
+	sb.WriteString("apiVersion: autotunnel/v1\n")
 	sb.WriteString("verbose: true\n")
 	sb.WriteString("auto_reload_config: false\n")
 	sb.WriteString("http:\n")
@@ -111,7 +111,7 @@ func writeTestConfig(t *testing.T, services map[string]serviceConfig) string {
 	}
 
 	// Write to temp file
-	tmpFile, err := os.CreateTemp("", "lazyfwd-test-config-*.yaml")
+	tmpFile, err := os.CreateTemp("", "autotunnel-test-config-*.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create temp config: %v", err)
 	}
@@ -143,43 +143,43 @@ func TestBasicProxyConnection(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
 		"echo.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "echo",
 			Port:      8080,
 		},
 	})
 
-	// Start lazyfwd
+	// Start autotunnel
 	_, cleanup := startOPF(t, configPath)
 	defer cleanup()
 
 	// Test cases
 	tests := []struct {
-		name           string
-		host           string
-		path           string
-		wantStatus     int
+		name             string
+		host             string
+		path             string
+		wantStatus       int
 		wantBodyContains string
 	}{
 		{
-			name:           "nginx service",
-			host:           "nginx.test",
-			path:           "/",
-			wantStatus:     http.StatusOK,
+			name:             "nginx service",
+			host:             "nginx.test",
+			path:             "/",
+			wantStatus:       http.StatusOK,
 			wantBodyContains: "nginx",
 		},
 		{
-			name:           "echo service",
-			host:           "echo.test",
-			path:           "/",
-			wantStatus:     http.StatusOK,
-			wantBodyContains: "lazyfwd-integration-test",
+			name:             "echo service",
+			host:             "echo.test",
+			path:             "/",
+			wantStatus:       http.StatusOK,
+			wantBodyContains: "autotunnel-integration-test",
 		},
 	}
 
@@ -222,7 +222,7 @@ func TestUnknownHostReturns502(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
@@ -252,7 +252,7 @@ func TestMultipleRequestsReusesTunnel(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
@@ -285,7 +285,7 @@ func TestGracefulShutdown(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
@@ -336,7 +336,7 @@ func TestDirectPodTargeting(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"standalone.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Pod:       "standalone-pod",
 			Port:      8080,
 		},
@@ -374,7 +374,7 @@ func TestXForwardedHeaders(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"headers.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "echo-headers",
 			Port:      80,
 			// Scheme defaults to "http" - use HTTP backend with HTTP scheme
@@ -446,7 +446,7 @@ func TestConcurrentRequestsSameHost(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
@@ -507,7 +507,7 @@ func TestHostHeaderWithPort(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
@@ -550,7 +550,7 @@ func TestTLSPassthrough(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx-tls.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx-tls",
 			Port:      443,
 			Scheme:    "https",
@@ -604,7 +604,7 @@ func TestTLSPassthrough(t *testing.T) {
 	}
 	body := bodyBuilder.String()
 
-	if !strings.Contains(body, "lazyfwd-tls-integration-test") {
+	if !strings.Contains(body, "autotunnel-tls-integration-test") {
 		t.Errorf("Response body does not contain expected text: %s", body)
 	}
 }
@@ -614,7 +614,7 @@ func TestTLSPassthroughCertFromBackend(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx-tls.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx-tls",
 			Port:      443,
 			Scheme:    "https",
@@ -653,7 +653,7 @@ func TestNamedPortResolution(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"named-port.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "echo-named-ports",
 			Port:      80, // Service port (will be resolved to named targetPort "http")
 		},
@@ -694,7 +694,7 @@ func TestIdleTimeoutCleanup(t *testing.T) {
 		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
 
-	configContent := fmt.Sprintf(`apiVersion: lazyfwd/v1
+	configContent := fmt.Sprintf(`apiVersion: autotunnel/v1
 verbose: true
 auto_reload_config: false
 http:
@@ -705,12 +705,12 @@ http:
     routes:
       idle.test:
         context: %s
-        namespace: lazyfwd-test
+        namespace: autotunnel-test
         service: nginx
         port: 80
 `, kubeconfig, getTestContext())
 
-	tmpFile, err := os.CreateTemp("", "lazyfwd-idle-test-*.yaml")
+	tmpFile, err := os.CreateTemp("", "autotunnel-idle-test-*.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create temp config: %v", err)
 	}
@@ -721,13 +721,13 @@ http:
 	}
 	tmpFile.Close()
 
-	// Start lazyfwd with custom config
-	binaryPath := filepath.Join("..", "..", "lazyfwd")
+	// Start autotunnel with custom config
+	binaryPath := filepath.Join("..", "..", "autotunnel")
 	cmd := exec.Command(binaryPath, "--config", tmpFile.Name(), "--verbose")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("Failed to start lazyfwd: %v", err)
+		t.Fatalf("Failed to start autotunnel: %v", err)
 	}
 	defer func() {
 		cmd.Process.Signal(os.Interrupt)
@@ -779,19 +779,19 @@ func TestMultiPortServiceRouting(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"api.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "multi-port",
 			Port:      8080,
 		},
 		"admin.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "multi-port",
 			Port:      8081,
 		},
 		"metrics.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "multi-port",
 			Port:      8082,
 		},
@@ -842,19 +842,19 @@ func TestConcurrentRequestsDifferentHosts(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
 		"echo.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "echo",
 			Port:      8080,
 		},
 		"api.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "multi-port",
 			Port:      8080,
 		},
@@ -919,7 +919,7 @@ func TestServiceNotFound(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nonexistent.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nonexistent-service",
 			Port:      80,
 		},
@@ -954,7 +954,7 @@ func TestWebSocketConnection(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"ws.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "websocket-echo",
 			Port:      8080,
 		},
@@ -1020,7 +1020,7 @@ func TestHostHeaderCaseSensitivity(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
@@ -1057,7 +1057,7 @@ func TestEmptyHostHeader(t *testing.T) {
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
-			Namespace: "lazyfwd-test",
+			Namespace: "autotunnel-test",
 			Service:   "nginx",
 			Port:      80,
 		},
@@ -1103,7 +1103,7 @@ func TestIdleTimeoutReset(t *testing.T) {
 		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
 
-	configContent := fmt.Sprintf(`apiVersion: lazyfwd/v1
+	configContent := fmt.Sprintf(`apiVersion: autotunnel/v1
 verbose: true
 auto_reload_config: false
 http:
@@ -1114,12 +1114,12 @@ http:
     routes:
       reset.test:
         context: %s
-        namespace: lazyfwd-test
+        namespace: autotunnel-test
         service: nginx
         port: 80
 `, kubeconfig, getTestContext())
 
-	tmpFile, err := os.CreateTemp("", "lazyfwd-reset-test-*.yaml")
+	tmpFile, err := os.CreateTemp("", "autotunnel-reset-test-*.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create temp config: %v", err)
 	}
@@ -1130,12 +1130,12 @@ http:
 	}
 	tmpFile.Close()
 
-	binaryPath := filepath.Join("..", "..", "lazyfwd")
+	binaryPath := filepath.Join("..", "..", "autotunnel")
 	cmd := exec.Command(binaryPath, "--config", tmpFile.Name(), "--verbose")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("Failed to start lazyfwd: %v", err)
+		t.Fatalf("Failed to start autotunnel: %v", err)
 	}
 	defer func() {
 		cmd.Process.Signal(os.Interrupt)

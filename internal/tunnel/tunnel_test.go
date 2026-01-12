@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/atas/lazyfwd/internal/config"
+	"github.com/atas/autotunnel/internal/config"
 )
 
 func TestState_String(t *testing.T) {

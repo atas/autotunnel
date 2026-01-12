@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/atas/lazyfwd/internal/config"
+	"github.com/atas/autotunnel/internal/config"
 )
 
 func TestTunnel_LocalPort(t *testing.T) {

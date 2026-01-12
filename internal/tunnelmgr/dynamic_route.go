@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/atas/lazyfwd/internal/config"
+	"github.com/atas/autotunnel/internal/config"
 )
 
 // ParseDynamicHostname parses a dynamic hostname into a K8sRouteConfig.

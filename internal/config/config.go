@@ -1,4 +1,4 @@
-// Package config handles YAML configuration loading and validation for lazyfwd.
+// Package config handles YAML configuration loading and validation for autotunnel.
 package config
 
 import (
@@ -11,7 +11,7 @@ import (
 )
 
 // CurrentApiVersion is the config format version supported by this build
-const CurrentApiVersion = "lazyfwd/v1"
+const CurrentApiVersion = "autotunnel/v1"
 
 // Config represents the application configuration
 type Config struct {

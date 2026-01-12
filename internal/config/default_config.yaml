@@ -1,9 +1,9 @@
-apiVersion: lazyfwd/v1
+apiVersion: autotunnel/v1
 
 # Verbose logging (can also use --verbose flag with higher priority)
 # verbose: false
 
-# Auto-reload on file changes. Any changes need `brew services restart lazyfwd` while it is false.
+# Auto-reload on file changes. Any changes need `brew services restart autotunnel` while it is false.
 auto_reload_config: true
 
 # Additional paths for exec credential plugins (e.g., aws-iam-authenticator, gcloud)
@@ -14,7 +14,7 @@ auto_reload_config: true
 
 http:
   # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
-  listen: ":8989"  # Port changes require: brew services restart lazyfwd
+  listen: ":8989"  # Port changes require: brew services restart autotunnel
 
   # Idle timeout before closing tunnels (Go duration format)
   # After this duration of no traffic, the tunnel will be closed

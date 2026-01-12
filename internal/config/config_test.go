@@ -27,7 +27,7 @@ func TestValidate_ApiVersion(t *testing.T) {
 		},
 		{
 			name:       "unsupported apiVersion fails",
-			apiVersion: "lazyfwd/v99",
+			apiVersion: "autotunnel/v99",
 			wantErr:    true,
 			errContain: "unsupported config apiVersion",
 		},
@@ -82,7 +82,7 @@ func TestLoadConfig_WithNewFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `apiVersion: lazyfwd/v1
+	configContent := `apiVersion: autotunnel/v1
 
 http:
   listen: ":9999"
@@ -105,8 +105,8 @@ http:
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	if cfg.ApiVersion != "lazyfwd/v1" {
-		t.Errorf("expected apiVersion 'lazyfwd/v1', got %q", cfg.ApiVersion)
+	if cfg.ApiVersion != "autotunnel/v1" {
+		t.Errorf("expected apiVersion 'autotunnel/v1', got %q", cfg.ApiVersion)
 	}
 
 	if cfg.HTTP.ListenAddr != ":9999" {
@@ -142,7 +142,7 @@ func TestLoadConfig_WithKubeconfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `apiVersion: lazyfwd/v1
+	configContent := `apiVersion: autotunnel/v1
 
 http:
   listen: ":9999"
@@ -177,7 +177,7 @@ func TestLoadConfig_KubeconfigTildeExpansion(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `apiVersion: lazyfwd/v1
+	configContent := `apiVersion: autotunnel/v1
 
 http:
   listen: ":9999"
@@ -508,7 +508,7 @@ func TestLoadConfig_ValidationFailure(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
 	// Write valid YAML but invalid config (missing listen)
-	configContent := `apiVersion: lazyfwd/v1
+	configContent := `apiVersion: autotunnel/v1
 http:
   idle_timeout: 30m
   k8s:
@@ -595,7 +595,7 @@ func TestResolveKubeconfigs_MultiplePaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `apiVersion: lazyfwd/v1
+	configContent := `apiVersion: autotunnel/v1
 
 http:
   listen: ":9999"
@@ -664,7 +664,7 @@ func TestResolveKubeconfigs_EnvVarFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `apiVersion: lazyfwd/v1
+	configContent := `apiVersion: autotunnel/v1
 
 http:
   listen: ":9999"
@@ -718,7 +718,7 @@ func TestResolveKubeconfigs_DefaultFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `apiVersion: lazyfwd/v1
+	configContent := `apiVersion: autotunnel/v1
 
 http:
   listen: ":9999"
@@ -771,7 +771,7 @@ func TestResolveKubeconfigs_ExplicitOverridesEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	configContent := `apiVersion: lazyfwd/v1
+	configContent := `apiVersion: autotunnel/v1
 
 http:
   listen: ":9999"
@@ -833,7 +833,7 @@ func TestCreateDefaultConfig(t *testing.T) {
 	if !strings.Contains(string(content), "apiVersion") {
 		t.Error("expected config to contain 'apiVersion'")
 	}
-	if !strings.Contains(string(content), "lazyfwd/v1") {
-		t.Error("expected config to contain 'lazyfwd/v1'")
+	if !strings.Contains(string(content), "autotunnel/v1") {
+		t.Error("expected config to contain 'autotunnel/v1'")
 	}
 }

@@ -1,16 +1,16 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
 
-project_name: lazyfwd
+project_name: autotunnel
 
 before:
    hooks:
       - go mod tidy
 
 builds:
-   - id: lazyfwd
+   - id: autotunnel
      main: .
-     binary: lazyfwd
+     binary: autotunnel
      env:
         - CGO_ENABLED=0
      goos:
@@ -33,7 +33,7 @@ archives:
      files:
         - README.md
         - LICENSE
-        - src: contrib/lazyfwd.service
+        - src: contrib/autotunnel.service
           dst: .
           strip_parent: true
 
@@ -52,41 +52,41 @@ changelog:
          - "Merge branch"
 
 brews:
-   - name: lazyfwd
+   - name: autotunnel
      repository:
         owner: atas
         name: homebrew-tap
         token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-     homepage: "https://github.com/atas/lazyfwd"
+     homepage: "https://github.com/atas/autotunnel"
      description: "On-demand Kubernetes port forwarding proxy"
      license: "MIT"
      install: |
-        bin.install "lazyfwd"
+        bin.install "autotunnel"
      service: |
-        run [opt_bin/"lazyfwd"]
+        run [opt_bin/"autotunnel"]
         keep_alive true
-        log_path var/"log/lazyfwd.log"
-        error_log_path var/"log/lazyfwd.log"
+        log_path var/"log/autotunnel.log"
+        error_log_path var/"log/autotunnel.log"
         working_dir var
      caveats: |
         ---------
-        To run lazyfwd as a background service:
-          brew services start lazyfwd
+        To run autotunnel as a background service:
+          brew services start autotunnel
         Service logs: 
-          tail -f $(brew --prefix)/var/log/lazyfwd.log
+          tail -f $(brew --prefix)/var/log/autotunnel.log
         For manual runs:
-          lazyfwd
+          autotunnel
         ---------
-        ⚠️ After running, edit the created 🔴 ~/.lazyfwd.yaml and add your routes!!! ‼️
+        ⚠️ After running, edit the created 🔴 ~/.autotunnel.yaml and add your routes!!! ‼️
         Route changes will be picked up automatically.
        ---------
         ⭐🌟⭐ Please give the repo a star if useful ⭐🌟⭐
-        https://github.com/atas/lazyfwd
+        https://github.com/atas/autotunnel
        ---------
 release:
    github:
       owner: atas
-      name: lazyfwd
+      name: autotunnel
    draft: false
    prerelease: auto
    name_template: "v{{.Version}}"

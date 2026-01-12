@@ -6,8 +6,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/atas/lazyfwd/internal/config"
-	"github.com/atas/lazyfwd/internal/tunnel"
+	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/tunnel"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )

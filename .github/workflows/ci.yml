@@ -49,7 +49,7 @@ jobs:
       - name: Create KIND cluster
         uses: helm/kind-action@v1
         with:
-          cluster_name: lazyfwd-test
+          cluster_name: autotunnel-test
 
       - name: Deploy test services
         run: kubectl apply -f tests/integration/manifests/
@@ -57,24 +57,24 @@ jobs:
       - name: Wait for pods
         run: |
           # Original services
-          kubectl wait --for=condition=ready pod -l app=nginx -n lazyfwd-test --timeout=120s
-          kubectl wait --for=condition=ready pod -l app=echo -n lazyfwd-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=nginx -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=echo -n autotunnel-test --timeout=120s
           # New services for expanded test coverage
-          kubectl wait --for=condition=ready pod -l app=nginx-tls -n lazyfwd-test --timeout=120s
-          kubectl wait --for=condition=ready pod -l app=echo-named-ports -n lazyfwd-test --timeout=120s
-          kubectl wait --for=condition=ready pod -l app=multi-port -n lazyfwd-test --timeout=120s
-          kubectl wait --for=condition=ready pod -l app=websocket-echo -n lazyfwd-test --timeout=120s
-          kubectl wait --for=condition=ready pod -l app=standalone-pod -n lazyfwd-test --timeout=120s
-          kubectl wait --for=condition=ready pod -l app=echo-headers -n lazyfwd-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=nginx-tls -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=echo-named-ports -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=multi-port -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=websocket-echo -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=standalone-pod -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=echo-headers -n autotunnel-test --timeout=120s
 
       - name: Build binary
-        run: go build -o lazyfwd .
+        run: go build -o autotunnel .
 
       - name: Run integration tests
         run: go test -v -tags=integration ./tests/integration/...
         env:
-          K8S_CONTEXT: kind-lazyfwd-test
+          K8S_CONTEXT: kind-autotunnel-test
 
       - name: Cleanup
         if: always()
-        run: kind delete cluster --name lazyfwd-test || true
+        run: kind delete cluster --name autotunnel-test || true
