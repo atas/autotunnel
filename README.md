@@ -111,7 +111,7 @@ apiVersion: autotunnel/v1
 auto_reload_config: true
 
 http:
-  listen: ":8989"
+  listen: "127.0.0.1:8989"
   idle_timeout: 60m
 
   k8s:
@@ -197,7 +197,7 @@ auto_reload_config: true
 
 http:
   # Listen address (handles both HTTP and HTTPS on same port)
-  listen: ":8989"  # Port changes require: brew services restart autotunnel
+  listen: "127.0.0.1:8989"  # Port changes require: brew services restart autotunnel
 
   # Idle timeout before closing tunnels (Go duration format)
   idle_timeout: 60m
