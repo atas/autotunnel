@@ -15,24 +15,29 @@ import (
 
 // Manager provides tunnel lifecycle management
 type Manager interface {
-	GetOrCreateTunnel(hostname string) (tunnelmgr.TunnelHandle, error)
+	GetOrCreateTunnel(hostname string, scheme string) (tunnelmgr.TunnelHandle, error)
 }
 
 // Server handles both HTTP and TLS passthrough on a single port
 type Server struct {
-	config   *config.Config
-	manager  Manager
-	listener *muxListener
-	server   *http.Server
-	done     chan struct{}
+	config               *config.Config
+	manager              Manager
+	listener             *muxListener
+	server               *http.Server
+	done                 chan struct{}
+	tlsErrorCertProvider *tlsErrorCertProvider
 }
 
 // NewServer creates a new unified server
 func NewServer(cfg *config.Config, mgr Manager) *Server {
+	// Initialize TLS error cert provider (ignore errors - will just not show TLS error pages if it fails)
+	certProvider, _ := newTLSErrorCertProvider()
+
 	return &Server{
-		config:  cfg,
-		manager: mgr,
-		done:    make(chan struct{}),
+		config:               cfg,
+		manager:              mgr,
+		done:                 make(chan struct{}),
+		tlsErrorCertProvider: certProvider,
 	}
 }
 

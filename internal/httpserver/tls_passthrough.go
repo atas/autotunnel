@@ -33,6 +33,7 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	sni, err := extractSNI(buf[:n])
 	if err != nil {
 		log.Printf("[tls] Failed to extract SNI: %v", err)
+		s.sendTLSErrorPage(conn.Conn, buf[:n], "", tlsErrorSNIExtraction, fmt.Sprintf("Failed to extract SNI: %v", err))
 		return
 	}
 
@@ -41,9 +42,10 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	}
 
 	// Look up or create tunnel
-	tunnel, err := s.manager.GetOrCreateTunnel(sni)
+	tunnel, err := s.manager.GetOrCreateTunnel(sni, "https")
 	if err != nil {
 		log.Printf("[tls] [%s] Error: %v", sni, err)
+		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorRouteNotFound, fmt.Sprintf("No service configured for host: %s", sni))
 		return
 	}
 
@@ -53,6 +55,7 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		if err := tunnel.Start(ctx); err != nil {
 			cancel()
 			log.Printf("[tls] [%s] Failed to start tunnel: %v", sni, err)
+			s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorTunnelStartup, fmt.Sprintf("Failed to start tunnel: %v", err))
 			return
 		}
 		cancel()
@@ -65,6 +68,7 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	backendConn, err := net.DialTimeout("tcp", backendAddr, 10*time.Second)
 	if err != nil {
 		log.Printf("[tls] [%s] Failed to connect to backend: %v", sni, err)
+		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorBackendConnection, fmt.Sprintf("Failed to connect to backend: %v", err))
 		return
 	}
 	defer backendConn.Close()
@@ -72,6 +76,7 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	// Forward the ClientHello
 	if _, err := backendConn.Write(buf[:n]); err != nil {
 		log.Printf("[tls] [%s] Failed to forward ClientHello: %v", sni, err)
+		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorForwarding, fmt.Sprintf("Failed to forward ClientHello: %v", err))
 		return
 	}
 

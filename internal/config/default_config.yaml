@@ -26,7 +26,19 @@ http:
     # then defaults to ~/.kube/config
     # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
+    # Dynamic routing: access any K8s service or pod without pre-configuring routes
+    # Formats:
+    #   Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamic_host}
+    #   Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamic_host}
+    # Examples:
+    #   http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989
+    #   https://argocd-server-443.svc.argocd.ns.my-cluster.cx.k8s.localhost:8989
+    #   http://nginx-2fxac-80.pod.default.ns.microk8s.cx.k8s.localhost:8989
+    dynamic_host: k8s.localhost
+
     routes:
+      # Static routes (take priority over dynamic routing)
+
       # # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)
       # argocd.localhost:
       #   context: my-cluster-context # Kubernetes context name from kubeconfig

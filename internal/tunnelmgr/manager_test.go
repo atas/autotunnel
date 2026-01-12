@@ -149,7 +149,7 @@ func TestGetOrCreateTunnel_UnknownHostname(t *testing.T) {
 	cfg := testConfig(map[string]config.K8sRouteConfig{})
 	m := NewManager(cfg)
 
-	_, err := m.GetOrCreateTunnel("unknown.localhost")
+	_, err := m.GetOrCreateTunnel("unknown.localhost", "http")
 
 	if err == nil {
 		t.Error("Expected error for unknown hostname")
@@ -171,7 +171,7 @@ func TestGetOrCreateTunnel_ReturnsExistingRunning(t *testing.T) {
 	m.tunnels["test.localhost"] = existingTunnel
 
 	// Act
-	result, err := m.GetOrCreateTunnel("test.localhost")
+	result, err := m.GetOrCreateTunnel("test.localhost", "http")
 
 	// Assert
 	if err != nil {
@@ -213,7 +213,7 @@ func TestGetOrCreateTunnel_RemovesStoppedTunnel(t *testing.T) {
 	}
 
 	// Act
-	result, err := m.GetOrCreateTunnel("test.localhost")
+	result, err := m.GetOrCreateTunnel("test.localhost", "http")
 
 	// Assert
 	if err != nil {
@@ -342,5 +342,52 @@ func TestShutdown_StopsAllTunnels(t *testing.T) {
 	// Tunnels map should be cleared
 	if len(m.tunnels) != 0 {
 		t.Errorf("Expected tunnels map to be empty, got %d entries", len(m.tunnels))
+	}
+}
+
+func TestGetOrCreateTunnel_DynamicRouteResolution(t *testing.T) {
+	// Config with dynamic_host but no static routes
+	cfg := &config.Config{
+		HTTP: config.HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+			K8s: config.K8sConfig{
+				DynamicHost: "k8s.localhost",
+				Routes:      map[string]config.K8sRouteConfig{}, // empty
+			},
+		},
+	}
+	m := NewManager(cfg)
+
+	// Set up factory to capture what config was used
+	var capturedConfig config.K8sRouteConfig
+	m.tunnelFactory = func(hostname string, cfg config.K8sRouteConfig,
+		clientset kubernetes.Interface, restConfig *rest.Config,
+		listenAddr string, verbose bool) TunnelHandle {
+		capturedConfig = cfg
+		return newMockTunnel(false)
+	}
+
+	// Pre-populate k8s client cache
+	m.k8sClients["microk8s"] = &k8sClient{clientset: nil, restConfig: nil}
+
+	// Act - use dynamic hostname format
+	_, err := m.GetOrCreateTunnel("nginx-80.svc.default.ns.microk8s.cx.k8s.localhost", "http")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if capturedConfig.Service != "nginx" {
+		t.Errorf("Expected service 'nginx', got %q", capturedConfig.Service)
+	}
+	if capturedConfig.Port != 80 {
+		t.Errorf("Expected port 80, got %d", capturedConfig.Port)
+	}
+	if capturedConfig.Namespace != "default" {
+		t.Errorf("Expected namespace 'default', got %q", capturedConfig.Namespace)
+	}
+	if capturedConfig.Context != "microk8s" {
+		t.Errorf("Expected context 'microk8s', got %q", capturedConfig.Context)
 	}
 }

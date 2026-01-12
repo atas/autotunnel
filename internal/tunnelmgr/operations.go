@@ -7,7 +7,7 @@ import (
 )
 
 // GetOrCreateTunnel returns an existing tunnel or creates a new one
-func (m *Manager) GetOrCreateTunnel(hostname string) (TunnelHandle, error) {
+func (m *Manager) GetOrCreateTunnel(hostname string, scheme string) (TunnelHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -21,8 +21,17 @@ func (m *Manager) GetOrCreateTunnel(hostname string) (TunnelHandle, error) {
 		delete(m.tunnels, hostname)
 	}
 
-	// Look up route config
+	// Look up route config (static routes first)
 	routeConfig, ok := m.config.HTTP.K8s.Routes[hostname]
+	if !ok {
+		// Try dynamic host resolution
+		if parsed, valid := ParseDynamicHostname(hostname, m.config.HTTP.K8s.DynamicHost, scheme); valid {
+			routeConfig = *parsed
+			ok = true
+			log.Printf("[dynamic] Resolved %s -> %s/%s:%d (context: %s)",
+				hostname, routeConfig.Namespace, routeConfig.Service+routeConfig.Pod, routeConfig.Port, routeConfig.Context)
+		}
+	}
 	if !ok {
 		return nil, fmt.Errorf("no route configured for hostname: %s", hostname)
 	}

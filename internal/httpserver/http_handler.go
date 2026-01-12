@@ -22,7 +22,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[http] [%s] %s %s", host, r.Method, r.URL.Path)
 	}
 
-	tunnel, err := s.manager.GetOrCreateTunnel(host)
+	tunnel, err := s.manager.GetOrCreateTunnel(host, "http")
 	if err != nil {
 		log.Printf("[http] [%s] Error: %v", host, err)
 		http.Error(w, fmt.Sprintf("No service configured for host: %s", host), http.StatusBadGateway)
@@ -70,6 +70,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("[http] [%s] Proxy error: %v", host, err)
+		http.Error(w, fmt.Sprintf("Proxy error for host '%s': %v", host, err), http.StatusBadGateway)
 	}
 
 	proxy.ServeHTTP(w, r)

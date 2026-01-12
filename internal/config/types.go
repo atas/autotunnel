@@ -14,6 +14,7 @@ type K8sConfig struct {
 	Kubeconfig          string                    `yaml:"kubeconfig"`
 	ResolvedKubeconfigs []string                  `yaml:"-"` // Computed: resolved paths (not from YAML)
 	Routes              map[string]K8sRouteConfig `yaml:"routes"`
+	DynamicHost         string                    `yaml:"dynamic_host"` // Dynamic routing suffix, e.g., "k8s.localhost"
 }
 
 // K8sRouteConfig represents a Kubernetes route mapping (service or pod)

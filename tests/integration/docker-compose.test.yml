@@ -1,12 +1,12 @@
 services:
   kind:
     build:
-      context: ./tests/integration
+      context: .
       dockerfile: Dockerfile.kind
     privileged: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./tests/integration/manifests:/manifests:ro
+      - ./manifests:/manifests:ro
       - kubeconfig:/output
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
@@ -58,7 +58,7 @@ services:
       kind:
         condition: service_healthy
     volumes:
-      - .:/app
+      - ../..:/app
       - kubeconfig:/kubeconfig:ro
       - go-cache:/go/pkg
     working_dir: /app
