@@ -59,8 +59,7 @@ brew services list             # Check status
 
 </details>
 
-#### Logs:
-Logs: 
+#### Logs
 ```bash
 tail -f $(brew --prefix)/var/log/autotunnel.log
 ```
@@ -239,7 +238,7 @@ Each route requires either `service` or `pod` (mutually exclusive):
 | ----------- | ----------------------------------------------------------- |
 | `context`   | Kubernetes context name from kubeconfig                     |
 | `namespace` | Kubernetes namespace                                        |
-| `service`   | Service name (autotunnel discovers a ready pod)                |
+| `service`   | Service name (autotunnel discovers a ready pod)             |
 | `pod`       | Pod name (direct targeting, no discovery)                   |
 | `port`      | Service or pod port                                         |
 | `scheme`    | `http` (default) or `https` - sets X-Forwarded-Proto header |
