@@ -25,7 +25,7 @@ func TestGetCertificate_GeneratesValidCert(t *testing.T) {
 		t.Fatalf("Failed to get certificate: %v", err)
 	}
 	if cert == nil {
-		t.Error("Certificate should not be nil")
+		t.Fatal("Certificate should not be nil")
 	}
 	if len(cert.Certificate) != 2 { // leaf + CA
 		t.Errorf("Expected 2 certs in chain, got %d", len(cert.Certificate))

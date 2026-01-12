@@ -52,6 +52,9 @@ func (s *Server) sendTLSErrorPage(conn net.Conn, clientHello []byte, hostname st
 		}
 		return
 	}
+	if cert == nil {
+		return
+	}
 
 	// Create TLS config with our certificate
 	tlsConfig := &tls.Config{
