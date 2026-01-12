@@ -69,18 +69,20 @@ brews:
         error_log_path var/"log/lazyfwd.log"
         working_dir var
      caveats: |
+        ---------
         To run lazyfwd as a background service:
           brew services start lazyfwd
-
-        View service logs:
+        Service logs: 
           tail -f $(brew --prefix)/var/log/lazyfwd.log
-
         For manual runs:
           lazyfwd
-
+        ---------
         ⚠️ After running, edit the created 🔴 ~/.lazyfwd.yaml and add your routes!!! ‼️
         Route changes will be picked up automatically.
-
+       ---------
+        ⭐🌟⭐ Please give the repo a star if useful ⭐🌟⭐
+        https://github.com/atas/lazyfwd
+       ---------
 release:
    github:
       owner: atas

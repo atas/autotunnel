@@ -52,6 +52,7 @@ func main() {
 ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝      ╚══╝╚══╝ ╚═════╝ ╚═╝    ╚═╝
 
 On-demand Port Forwarding
+⭐🌟⭐ Please give the repo a star if useful ⭐🌟⭐
 https://github.com/atas/lazyfwd`)
 
 	// Configure logging
@@ -60,14 +61,13 @@ https://github.com/atas/lazyfwd`)
 
 	// Check if config exists, create default if not
 	if !config.ConfigExists(configPath) {
-		fmt.Printf("Config file not found: %s\n", configPath)
-		fmt.Println("Creating default configuration file...")
+		fmt.Printf("Config file not found, creating: %s\n", configPath)
 
 		if err := config.CreateDefaultConfig(configPath); err != nil {
 			log.Fatalf("Failed to create config file: %v", err)
 		}
 
-		fmt.Printf("\nCreated: %s\n", configPath)
+		fmt.Printf("Created: %s\n", configPath)
 	}
 
 	// Load configuration (includes validation)
