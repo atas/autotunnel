@@ -105,15 +105,25 @@ autotunnel
 ```yaml
 apiVersion: autotunnel/v1
 
+# Auto-reload config on file changes
+auto_reload_config: true
+
 http:
   listen: ":8989"
   idle_timeout: 60m
 
   k8s:
-    routes:
+    # kubeconfig: ~/.kube/config:~/.kube/other-config
+
+    # Dynamic routing: access any service without pre-configuring routes
+    # Example: http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989
+    dynamic_host: k8s.localhost
+
+    routes: # Static routes
+
       # https://argocd.localhost:8989
       argocd.localhost:
-        context: microk8s
+        context: my-cluster
         namespace: argocd
         service: argocd-server
         port: 443
@@ -121,7 +131,7 @@ http:
 
       # http://grafana.localhost:8989
       grafana.localhost:
-        context: microk8s
+        context: my-cluster
         namespace: observability
         service: grafana
         port: 80
