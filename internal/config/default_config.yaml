@@ -6,58 +6,57 @@ apiVersion: autotunnel/v1
 # Auto-reload on file changes. Any changes need `brew services restart autotunnel` while it is false.
 auto_reload_config: true
 
-# Additional paths for exec credential plugins (e.g., aws-iam-authenticator, gcloud)
 # Common paths (/usr/local/bin, /opt/homebrew/bin, etc.) are added automatically.
 # Add custom paths here if your credential plugin is in a non-standard location.
 # exec_path:
 #   - /custom/path/to/binaries
 
 http:
-  # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
-  listen: "127.0.0.1:8989"  # Port changes require: brew services restart autotunnel
+   # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
+   listen: "127.0.0.1:8989" # Port changes require: brew services restart autotunnel
 
-  # Idle timeout before closing tunnels (Go duration format)
-  # After this duration of no traffic, the tunnel will be closed
-  idle_timeout: 60m
+   # Idle timeout before closing tunnels (Go duration format)
+   # After this duration of no traffic, the tunnel will be closed
+   idle_timeout: 60m
 
-  k8s:
-    # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
-    # Tries to use $KUBECONFIG env var as well but that's not available in the brew service
-    # then defaults to ~/.kube/config
-    # kubeconfig: ~/.kube/config:~/.kube/prod-config
+   k8s:
+      # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
+      # Tries to use $KUBECONFIG env var as well but that's not available in the service
+      # then defaults to ~/.kube/config
+      # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
-    # Dynamic routing: access any K8s service or pod without pre-configuring routes
-    # Formats:
-    #   Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamic_host}
-    #   Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamic_host}
-    # Examples:
-    #   http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989
-    #   https://argocd-server-443.svc.argocd.ns.my-cluster.cx.k8s.localhost:8989
-    #   http://nginx-2fxac-80.pod.default.ns.microk8s.cx.k8s.localhost:8989
-    dynamic_host: k8s.localhost
+      # Dynamic routing: access any K8s service or pod without pre-configuring routes
+      # Formats:
+      #   Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamic_host}
+      #   Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamic_host}
+      # Examples:
+      #   http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989
+      #   https://argocd-server-443.svc.argocd.ns.my-cluster.cx.k8s.localhost:8989
+      #   http://nginx-2fxac-80.pod.default.ns.microk8s.cx.k8s.localhost:8989
+      dynamic_host: k8s.localhost
 
-    routes:
-      # Static routes (take priority over dynamic routing)
+      routes:
+         # Static routes (take priority over dynamic routing)
 
-      # # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)
-      # argocd.localhost:
-      #   context: my-cluster-context # Kubernetes context name from kubeconfig
-      #   namespace: argocd           # Kubernetes namespace
-      #   service: argocd-server      # Kubernetes service name
-      #   port: 443                   # Service port (automatically resolves to container targetPort)
-      #   scheme: https               # Set X-Forwarded-Proto header (use "https" to prevent HTTPS redirects)
+         # # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)
+         # argocd.localhost:
+         #   context: my-cluster-context # Kubernetes context name from kubeconfig
+         #   namespace: argocd           # Kubernetes namespace
+         #   service: argocd-server      # Kubernetes service name
+         #   port: 443                   # Service port (automatically resolves to container targetPort)
+         #   scheme: https               # Set X-Forwarded-Proto header (use "https" to prevent HTTPS redirects)
 
-      # # http://grafana.localhost:8989
-      # grafana.localhost:
-      #   context: my-cluster-context
-      #   namespace: monitoring
-      #   service: grafana
-      #   port: 3000
-      #   scheme: http               # Default is "http", no need to specify
+         # # http://grafana.localhost:8989
+         # grafana.localhost:
+         #   context: my-cluster-context
+         #   namespace: monitoring
+         #   service: grafana
+         #   port: 3000
+         #   scheme: http               # Default is "http", no need to specify
 
-      # http://debug.localhost:8989
-      # debug.localhost:
-      #   context: microk8s
-      #   namespace: default
-      #   pod: my-debug-pod         # Pod name (use instead of service)
-      #   port: 8080
+         # http://debug.localhost:8989
+         # debug.localhost:
+         #   context: microk8s
+         #   namespace: default
+         #   pod: my-debug-pod         # Pod name (use instead of service)
+         #   port: 8080
