@@ -34,18 +34,18 @@ Connect to Kubernetes services and pods with friendly URLs automatically:
 
 ```bash
 brew install atas/tap/autotunnel
-```
-
-### Running as a Background Service
-
-**macOS (via Homebrew):**
-```bash
 brew services start autotunnel    # Start and enable auto-start on login
 # Or run manually
 # autotunnel
 ```
 
-**After starting it, edit the created config file `~/.autotunnel.yaml` with an editor to add your routes.**
+**After starting it, edit the created config file `~/.autotunnel.yaml` with an editor to add your custom routes / kubeconfig paths.**  
+The config auto-reloads on save unless port changes, then `brew services restart autotunnel` is required.
+
+#### Logs
+```bash
+tail -f $(brew --prefix)/var/log/autotunnel.log
+```
 
 <details>
 <summary><strong>Other useful commands</strong></summary>
@@ -58,11 +58,6 @@ brew services list             # Check status
 ```
 
 </details>
-
-#### Logs
-```bash
-tail -f $(brew --prefix)/var/log/autotunnel.log
-```
 
 <details>
 <summary><strong>Linux (systemd)</strong></summary>
@@ -83,15 +78,15 @@ journalctl --user -u autotunnel -f
 
 </details>
 
-### Go Install
+<details>
+<summary>Go Install</summary>
 
 ```bash
 go install github.com/atas/autotunnel@latest
 ```
 
-### Download Binary
-
 Download the latest release from the [releases page](https://github.com/atas/autotunnel/releases).
+</details>
 
 ## Quick Start
 
