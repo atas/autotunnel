@@ -95,48 +95,65 @@ Download the latest release from the [releases page](https://github.com/atas/aut
 
 ## Quick Start
 
-1. Run autotunnel once to generate a default config:
+1. Run autotunnel, either manually or as a service. It will generate a default config file:
 
 ```bash
-autotunnel
+brew services start autotunnel #or just run `autotunnel` manually
 # Creates ~/.autotunnel.yaml with example configuration
 ```
 
 2. Edit `~/.autotunnel.yaml` with your services:
 
+3. It will auto-reload unless port changes.
+
 ```yaml
 apiVersion: autotunnel/v1
 
-# Auto-reload config on file changes
+# Verbose logging (can also use --verbose flag with higher priority)
+# verbose: false
+
+# Auto-reload on file changes. Any changes need `brew services restart autotunnel` while it is false.
 auto_reload_config: true
 
+# Common paths (/usr/local/bin, /opt/homebrew/bin, etc.) are added automatically.
+# Add custom paths here if your credential plugin is in a non-standard location.
+# exec_path:
+#   - /custom/path/to/binaries
+
 http:
-  listen: "127.0.0.1:8989"
-  idle_timeout: 60m
+   # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
+   listen: "127.0.0.1:8989" # Port changes require: brew services restart autotunnel
 
-  k8s:
-    # kubeconfig: ~/.kube/config:~/.kube/other-config
+   # Idle timeout before closing tunnels (Go duration format)
+   # After this duration of no traffic, the tunnel will be closed
+   idle_timeout: 60m
 
-    # Dynamic routing: access any service without pre-configuring routes
-    # Example: http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989
-    dynamic_host: k8s.localhost
+   k8s:
+      # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
+      # Tries to use $KUBECONFIG env var as well but that's not available in the service
+      # then defaults to ~/.kube/config
+      # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
-    routes: # Static routes
+      # Dynamic routing: access any K8s service or pod without pre-configuring routes
+      # Formats:
+      #   Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamic_host}
+      #   Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamic_host}
+      # Examples:
+      #   http://nginx-80.svc.default.ns.my-cluster-context.cx.k8s.localhost:8989
+      #   https://argocd-server-443.svc.argocd.ns.my-cluster-context.cx.k8s.localhost:8989
+      #   http://nginx-2fxac-80.pod.default.ns.my-cluster-context.cx.k8s.localhost:8989
+      dynamic_host: k8s.localhost
 
-      # https://argocd.localhost:8989
-      argocd.localhost:
-        context: my-cluster
-        namespace: argocd
-        service: argocd-server
-        port: 443
-        scheme: https
+      routes:
+         # Static routes (take priority over dynamic routing)
 
-      # http://grafana.localhost:8989
-      grafana.localhost:
-        context: my-cluster
-        namespace: observability
-        service: grafana
-        port: 80
+         # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)
+         argocd.localhost:
+           context: my-cluster-context # Kubernetes context name from kubeconfig
+           namespace: argocd           # Kubernetes namespace
+           service: argocd-server      # Kubernetes service name
+           port: 443                   # Service port (automatically resolves to container targetPort)
+           scheme: https               # Default is http.
 ```
 
 3. Run autotunnel:
