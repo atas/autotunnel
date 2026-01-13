@@ -51,10 +51,11 @@ tail -f $(brew --prefix)/var/log/autotunnel.log
 <summary><strong>Other useful commands</strong></summary>
 
 ```bash
-brew services stop autotunnel     # Stop the service
-brew services info autotunnel     # Show information about the service
-brew services restart autotunnel  # Restart the service
-brew services list             # Check status
+brew services stop autotunnel       # Stop the service
+brew services info autotunnel       # Show information about the service
+brew services restart autotunnel    # Restart the service
+brew services uninstall autotunnel  # Uninstall the service
+brew services list                  # Check status
 ```
 
 </details>
