@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // ConfigExists checks if the config file exists
@@ -37,7 +38,10 @@ func (c *Config) LogRoutes() {
 		if scheme == "" {
 			scheme = "http"
 		}
-		local := fmt.Sprintf("%s://%s%s", scheme, hostname, c.HTTP.ListenAddr)
+		// Extract port from ListenAddr (handles ":8989" and "127.0.0.1:8989")
+		parts := strings.Split(c.HTTP.ListenAddr, ":")
+		port := parts[len(parts)-1]
+		local := fmt.Sprintf("%s://%s:%s", scheme, hostname, port)
 		var target string
 		if route.Pod != "" {
 			target = fmt.Sprintf("pod/%s:%d", route.Pod, route.Port)
