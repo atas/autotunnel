@@ -26,6 +26,8 @@ http:
       # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
       # Dynamic routing: access any K8s service or pod without pre-configuring routes
+      # IMPORTANT: *.localhost domains don't resolve to 127.0.0.1 on all systems.
+      #            You can use local.gd, sslip.io, lvh.me, etc. if you TRUST them.
       # Formats:
       #   Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamic_host}
       #   Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamic_host}
