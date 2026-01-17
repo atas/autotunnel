@@ -53,8 +53,13 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 	}
 
 	if h.verbose {
-		log.Printf("[socat:%d] Connecting via pod %s/%s to %s:%d",
-			localPort, h.route.Namespace, podName, h.route.Target.Host, h.route.Target.Port)
+		if h.route.Via.Service != "" {
+			log.Printf("[socat:%d] Connecting via service %s (pod %s/%s) to %s:%d",
+				localPort, h.route.Via.Service, h.route.Namespace, podName, h.route.Target.Host, h.route.Target.Port)
+		} else {
+			log.Printf("[socat:%d] Connecting via pod %s/%s to %s:%d",
+				localPort, h.route.Namespace, podName, h.route.Target.Host, h.route.Target.Port)
+		}
 	}
 
 	cmd, err := h.buildForwardCommand()
