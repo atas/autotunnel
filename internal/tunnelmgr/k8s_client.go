@@ -9,15 +9,13 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// k8sClient holds a cached Kubernetes clientset and REST config for a context
 type k8sClient struct {
 	clientset  *kubernetes.Clientset
 	restConfig *rest.Config
 }
 
-// getClientsetAndConfig returns a cached or newly created k8s client for the given context
 func (m *Manager) getClientsetAndConfig(kubeconfigPaths []string, contextName string) (*kubernetes.Clientset, *rest.Config, error) {
-	// Try read lock first for cached client
+	// fast path: already have a client for this context
 	m.k8sClientsMu.RLock()
 	if client, ok := m.k8sClients[contextName]; ok {
 		m.k8sClientsMu.RUnlock()
@@ -25,25 +23,21 @@ func (m *Manager) getClientsetAndConfig(kubeconfigPaths []string, contextName st
 	}
 	m.k8sClientsMu.RUnlock()
 
-	// Acquire write lock to create new client
 	m.k8sClientsMu.Lock()
 	defer m.k8sClientsMu.Unlock()
 
-	// Double-check after acquiring write lock
+	// another goroutine might have created it while we were waiting for the lock
 	if client, ok := m.k8sClients[contextName]; ok {
 		return client.clientset, client.restConfig, nil
 	}
 
-	// Build REST config with support for multiple kubeconfig files
+	// client-go can merge multiple kubeconfig files (like kubectl does with KUBECONFIG=a:b:c)
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if len(kubeconfigPaths) > 0 {
-		// Use explicit paths from config (merged in order)
 		loadingRules.Precedence = kubeconfigPaths
 	}
-	// If kubeconfigPaths is empty, client-go will use $KUBECONFIG or default ~/.kube/config
 	configOverrides := &clientcmd.ConfigOverrides{CurrentContext: contextName}
 	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-
 	restConfig, err := kubeConfig.ClientConfig()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build REST config for context %s: %w", contextName, err)
@@ -55,7 +49,6 @@ func (m *Manager) getClientsetAndConfig(kubeconfigPaths []string, contextName st
 		return nil, nil, fmt.Errorf("failed to create clientset for context %s: %w", contextName, err)
 	}
 
-	// Cache and return
 	m.k8sClients[contextName] = &k8sClient{
 		clientset:  clientset,
 		restConfig: restConfig,

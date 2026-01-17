@@ -532,22 +532,20 @@ http:
 	}
 }
 
-func TestConfigExists(t *testing.T) {
+func TestFileExists(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Test with existing file
 	existingPath := filepath.Join(tmpDir, "exists.yaml")
 	if err := os.WriteFile(existingPath, []byte("test"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
-	if !ConfigExists(existingPath) {
-		t.Error("expected ConfigExists to return true for existing file")
+	if !FileExists(existingPath) {
+		t.Error("expected FileExists to return true for existing file")
 	}
 
-	// Test with non-existing file
 	nonExistingPath := filepath.Join(tmpDir, "does-not-exist.yaml")
-	if ConfigExists(nonExistingPath) {
-		t.Error("expected ConfigExists to return false for non-existing file")
+	if FileExists(nonExistingPath) {
+		t.Error("expected FileExists to return false for non-existing file")
 	}
 }
 
@@ -816,7 +814,7 @@ func TestCreateDefaultConfig(t *testing.T) {
 	}
 
 	// Verify file exists
-	if !ConfigExists(configPath) {
+	if !FileExists(configPath) {
 		t.Error("expected config file to be created")
 	}
 
@@ -835,5 +833,336 @@ func TestCreateDefaultConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "autotunnel/v1") {
 		t.Error("expected config to contain 'autotunnel/v1'")
+	}
+}
+
+
+// TestValidate_SocatRoute tests validation of socat routes
+func TestValidate_SocatRoute(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			IdleTimeout: 60 * time.Minute,
+			K8s: TCPK8sConfig{
+				Socat: map[int]SocatRouteConfig{
+					3306: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Service: "backend-api",
+						},
+						Target: TargetConfig{
+							Host: "mydb.rds.amazonaws.com",
+							Port: 3306,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err != nil {
+		t.Errorf("unexpected error for valid socat route: %v", err)
+	}
+}
+
+// TestValidate_SocatRouteMissingVia tests that socat routes require via config
+func TestValidate_SocatRouteMissingVia(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Socat: map[int]SocatRouteConfig{
+					3306: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via:       ViaConfig{}, // Neither pod nor service
+						Target: TargetConfig{
+							Host: "mydb.rds.amazonaws.com",
+							Port: 3306,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for socat route without via config")
+	}
+	if !strings.Contains(err.Error(), "via.pod or via.service is required") {
+		t.Errorf("expected error about missing via, got: %v", err)
+	}
+}
+
+// TestValidate_SocatRouteBothPodAndService tests that pod and service are mutually exclusive
+func TestValidate_SocatRouteBothPodAndService(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Socat: map[int]SocatRouteConfig{
+					3306: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Pod:     "bastion-pod",
+							Service: "backend-api", // Both specified
+						},
+						Target: TargetConfig{
+							Host: "mydb.rds.amazonaws.com",
+							Port: 3306,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for socat route with both pod and service")
+	}
+	if !strings.Contains(err.Error(), "cannot specify both via.pod and via.service") {
+		t.Errorf("expected error about mutual exclusivity, got: %v", err)
+	}
+}
+
+// TestValidate_SocatRouteMissingTarget tests that target host is required
+func TestValidate_SocatRouteMissingTarget(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Socat: map[int]SocatRouteConfig{
+					3306: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Service: "backend-api",
+						},
+						Target: TargetConfig{
+							Host: "", // Missing
+							Port: 3306,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for socat route without target host")
+	}
+	if !strings.Contains(err.Error(), "target.host is required") {
+		t.Errorf("expected error about missing target host, got: %v", err)
+	}
+}
+
+// TestValidate_SocatRouteInvalidTargetPort tests that target port must be valid
+func TestValidate_SocatRouteInvalidTargetPort(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Socat: map[int]SocatRouteConfig{
+					3306: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Service: "backend-api",
+						},
+						Target: TargetConfig{
+							Host: "mydb.rds.amazonaws.com",
+							Port: 0, // Invalid
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for socat route with invalid target port")
+	}
+	if !strings.Contains(err.Error(), "target.port must be between") {
+		t.Errorf("expected error about invalid target port, got: %v", err)
+	}
+}
+
+// TestValidate_PortCollisionBetweenRoutesAndSocat tests port collision detection
+func TestValidate_PortCollisionBetweenRoutesAndSocat(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Routes: map[int]TCPRouteConfig{
+					3306: {
+						Context:   "test-context",
+						Namespace: "default",
+						Service:   "mysql",
+						Port:      3306,
+					},
+				},
+				Socat: map[int]SocatRouteConfig{
+					3306: { // Same port - collision!
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Service: "backend-api",
+						},
+						Target: TargetConfig{
+							Host: "mydb.rds.amazonaws.com",
+							Port: 3306,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for port collision between routes and socat")
+	}
+	if !strings.Contains(err.Error(), "port already used in tcp.k8s.routes") {
+		t.Errorf("expected error about port collision, got: %v", err)
+	}
+}
+
+// TestValidate_SocatRouteWithDirectPod tests socat route with direct pod targeting
+func TestValidate_SocatRouteWithDirectPod(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Socat: map[int]SocatRouteConfig{
+					3306: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Pod:       "bastion-pod",
+							Container: "main", // Optional container
+						},
+						Target: TargetConfig{
+							Host: "mydb.rds.amazonaws.com",
+							Port: 3306,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err != nil {
+		t.Errorf("unexpected error for socat route with direct pod: %v", err)
+	}
+}
+
+// TestLoadConfig_WithSocatRoutes tests loading config with socat routes
+func TestLoadConfig_WithSocatRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `apiVersion: autotunnel/v1
+
+http:
+  listen: ":8989"
+  idle_timeout: 30m
+
+tcp:
+  idle_timeout: 60m
+  k8s:
+    socat:
+      3306:
+        context: eks-prod
+        namespace: default
+        via:
+          service: backend-api
+        target:
+          host: mydb.cluster-xyz.us-east-1.rds.amazonaws.com
+          port: 3306
+      5432:
+        context: eks-prod
+        namespace: default
+        via:
+          pod: bastion-pod
+          container: main
+        target:
+          host: 10.123.45.67
+          port: 5432
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Verify socat routes were loaded
+	if len(cfg.TCP.K8s.Socat) != 2 {
+		t.Fatalf("expected 2 socat routes, got %d", len(cfg.TCP.K8s.Socat))
+	}
+
+	// Verify MySQL route
+	mysql, ok := cfg.TCP.K8s.Socat[3306]
+	if !ok {
+		t.Fatal("expected socat route for port 3306")
+	}
+	if mysql.Context != "eks-prod" {
+		t.Errorf("expected context 'eks-prod', got %q", mysql.Context)
+	}
+	if mysql.Via.Service != "backend-api" {
+		t.Errorf("expected via.service 'backend-api', got %q", mysql.Via.Service)
+	}
+	if mysql.Target.Host != "mydb.cluster-xyz.us-east-1.rds.amazonaws.com" {
+		t.Errorf("expected target.host 'mydb.cluster-xyz.us-east-1.rds.amazonaws.com', got %q", mysql.Target.Host)
+	}
+
+	// Verify PostgreSQL route
+	postgres, ok := cfg.TCP.K8s.Socat[5432]
+	if !ok {
+		t.Fatal("expected socat route for port 5432")
+	}
+	if postgres.Via.Pod != "bastion-pod" {
+		t.Errorf("expected via.pod 'bastion-pod', got %q", postgres.Via.Pod)
+	}
+	if postgres.Via.Container != "main" {
+		t.Errorf("expected via.container 'main', got %q", postgres.Via.Container)
 	}
 }

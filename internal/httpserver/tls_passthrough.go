@@ -13,7 +13,7 @@ import (
 func (s *Server) handleTLSConnection(conn *peekConn) {
 	defer conn.Close()
 
-	// Set deadline for reading ClientHello
+	// give slow clients 10s to send ClientHello
 	_ = conn.Conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 	// Read enough for ClientHello
@@ -26,10 +26,8 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		return
 	}
 
-	// Clear deadline
 	_ = conn.Conn.SetReadDeadline(time.Time{})
 
-	// Extract SNI
 	sni, err := extractSNI(buf[:n])
 	if err != nil {
 		log.Printf("[tls] Failed to extract SNI: %v", err)
@@ -41,7 +39,6 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		log.Printf("[tls] [%s] New connection", sni)
 	}
 
-	// Look up or create tunnel
 	tunnel, err := s.manager.GetOrCreateTunnel(sni, "https")
 	if err != nil {
 		log.Printf("[tls] [%s] Error: %v", sni, err)
@@ -49,7 +46,6 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		return
 	}
 
-	// Ensure tunnel is running
 	if !tunnel.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := tunnel.Start(ctx); err != nil {
@@ -63,7 +59,6 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 
 	tunnel.Touch()
 
-	// Connect to backend
 	backendAddr := fmt.Sprintf("127.0.0.1:%d", tunnel.LocalPort())
 	backendConn, err := net.DialTimeout("tcp", backendAddr, 10*time.Second)
 	if err != nil {
@@ -73,14 +68,13 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	}
 	defer backendConn.Close()
 
-	// Forward the ClientHello
+	// replay the ClientHello we already read - backend hasn't seen it yet
 	if _, err := backendConn.Write(buf[:n]); err != nil {
 		log.Printf("[tls] [%s] Failed to forward ClientHello: %v", sni, err)
 		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorForwarding, fmt.Sprintf("Failed to forward ClientHello: %v", err))
 		return
 	}
 
-	// Bidirectional copy
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -103,9 +97,10 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	wg.Wait()
 }
 
-// extractSNI parses the TLS ClientHello and extracts the SNI extension
+// extractSNI parses the TLS ClientHello to find the Server Name Indication.
+// This is how we know which backend to route to before TLS terminates.
 func extractSNI(data []byte) (string, error) {
-	// TLS record header: type(1) + version(2) + length(2)
+	// TLS record: type(1) + version(2) + length(2) = 5 bytes minimum
 	if len(data) < 5 {
 		return "", fmt.Errorf("data too short for TLS record")
 	}
@@ -115,13 +110,11 @@ func extractSNI(data []byte) (string, error) {
 		return "", fmt.Errorf("not a TLS handshake record")
 	}
 
-	// Record length
 	recordLen := int(data[3])<<8 | int(data[4])
 	if len(data) < 5+recordLen {
 		return "", fmt.Errorf("incomplete TLS record")
 	}
 
-	// Handshake header: type(1) + length(3)
 	handshake := data[5:]
 	if len(handshake) < 4 {
 		return "", fmt.Errorf("data too short for handshake header")
@@ -132,39 +125,34 @@ func extractSNI(data []byte) (string, error) {
 		return "", fmt.Errorf("not a ClientHello")
 	}
 
-	// Skip handshake header (4 bytes) + version (2) + random (32) = 38 bytes
+	// skip: handshake header(4) + version(2) + random(32) = 38 bytes
 	pos := 38
 	if len(handshake) < pos+1 {
 		return "", fmt.Errorf("data too short for session ID length")
 	}
 
-	// Session ID
 	sessionIDLen := int(handshake[pos])
 	pos += 1 + sessionIDLen
 	if len(handshake) < pos+2 {
 		return "", fmt.Errorf("data too short for cipher suites length")
 	}
 
-	// Cipher suites
 	cipherSuitesLen := int(handshake[pos])<<8 | int(handshake[pos+1])
 	pos += 2 + cipherSuitesLen
 	if len(handshake) < pos+1 {
 		return "", fmt.Errorf("data too short for compression methods length")
 	}
 
-	// Compression methods
 	compressionLen := int(handshake[pos])
 	pos += 1 + compressionLen
 	if len(handshake) < pos+2 {
 		return "", fmt.Errorf("no extensions present")
 	}
 
-	// Extensions length
 	extensionsLen := int(handshake[pos])<<8 | int(handshake[pos+1])
 	pos += 2
 	extensionsEnd := pos + extensionsLen
 
-	// Parse extensions
 	for pos+4 <= extensionsEnd && pos+4 <= len(handshake) {
 		extType := int(handshake[pos])<<8 | int(handshake[pos+1])
 		extLen := int(handshake[pos+2])<<8 | int(handshake[pos+3])
@@ -174,14 +162,13 @@ func extractSNI(data []byte) (string, error) {
 			break
 		}
 
-		// SNI extension type is 0x0000
+		// SNI is extension type 0x0000
 		if extType == 0 {
-			// SNI extension data: list length (2) + type (1) + name length (2) + name
 			extData := handshake[pos : pos+extLen]
 			if len(extData) < 5 {
 				return "", fmt.Errorf("SNI extension too short")
 			}
-			// Skip list length (2) + type (1)
+			// skip list length(2) + host type(1)
 			nameLen := int(extData[3])<<8 | int(extData[4])
 			if len(extData) < 5+nameLen {
 				return "", fmt.Errorf("SNI name truncated")

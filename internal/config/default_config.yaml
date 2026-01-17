@@ -60,3 +60,81 @@ http:
          #   namespace: default
          #   pod: my-debug-pod         # Pod name (use instead of service)
          #   port: 8080
+
+# TCP tunneling for non-HTTP protocols (databases, caches, etc.)
+# Each route listens on a local port and forwards to a K8s service/pod
+# tcp:
+#    # Idle timeout before closing tunnels (Go duration format)
+#    idle_timeout: 60m
+#
+#    k8s:
+#       # Path(s) to kubeconfig (same format as http.k8s.kubeconfig)
+#       # kubeconfig: ~/.kube/config
+#
+#       # Direct port-forward routes (native K8s port-forward)
+#       routes:
+#          # PostgreSQL: connect via localhost:5432
+#          # 5432:
+#          #   context: my-cluster-context
+#          #   namespace: databases
+#          #   service: postgresql
+#          #   port: 5432
+#
+#          # Redis: connect via localhost:6379
+#          # 6379:
+#          #   context: my-cluster-context
+#          #   namespace: caching
+#          #   service: redis-master
+#          #   port: 6379
+#
+#          # MySQL: connect via localhost:3306
+#          # 3306:
+#          #   context: my-cluster-context
+#          #   namespace: databases
+#          #   service: mysql
+#          #   port: 3306
+#
+#          # Direct pod targeting (no service discovery)
+#          # 27017:
+#          #   context: my-cluster-context
+#          #   namespace: databases
+#          #   pod: mongodb-0           # Pod name (use instead of service)
+#          #   port: 27017
+#
+#       # Jump-host routes via kubectl exec + socat/nc
+#       # Use this to connect to VPC-internal services (RDS, Cloud SQL, etc.)
+#       # through a jump pod that has network access to those services.
+#       # Requires socat or nc (netcat) installed in the jump pod.
+#       socat:
+#          # AWS RDS MySQL: connect via localhost:3306 -> jump pod -> RDS
+#          # 3306:
+#          #   context: eks-prod
+#          #   namespace: default
+#          #   via:
+#          #     service: backend-api   # Discover pod from service selector
+#          #     # OR use direct pod:
+#          #     # pod: bastion-pod
+#          #     # container: main      # Optional: specify container in multi-container pods
+#          #   target:
+#          #     host: mydb.cluster-xyz.us-east-1.rds.amazonaws.com
+#          #     port: 3306
+#
+#          # Google Cloud SQL PostgreSQL: connect via localhost:5432 -> jump pod -> Cloud SQL
+#          # 5432:
+#          #   context: gke-prod
+#          #   namespace: default
+#          #   via:
+#          #     service: api-server
+#          #   target:
+#          #     host: 10.123.45.67     # Cloud SQL private IP
+#          #     port: 5432
+#
+#          # ElastiCache Redis: connect via localhost:6379 -> jump pod -> ElastiCache
+#          # 6379:
+#          #   context: eks-prod
+#          #   namespace: default
+#          #   via:
+#          #     pod: worker-deployment-abc123
+#          #   target:
+#          #     host: my-redis.abc123.0001.use1.cache.amazonaws.com
+#          #     port: 6379

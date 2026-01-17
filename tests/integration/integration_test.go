@@ -66,8 +66,8 @@ func startOPF(t *testing.T, configPath string) (*exec.Cmd, func()) {
 
 	cleanup := func() {
 		if cmd.Process != nil {
-			cmd.Process.Signal(os.Interrupt)
-			cmd.Wait()
+			_ = cmd.Process.Signal(os.Interrupt)
+			_ = cmd.Wait()
 		}
 	}
 
@@ -135,6 +135,87 @@ type serviceConfig struct {
 	Pod       string // Pod name for direct targeting (mutually exclusive with Service)
 	Port      int
 	Scheme    string // "http" or "https" for X-Forwarded-Proto header
+}
+
+// tcpRouteConfig represents a TCP route configuration for tests
+type tcpRouteConfig struct {
+	Context   string
+	Namespace string
+	Service   string
+	Pod       string
+	Port      int
+}
+
+// writeTestConfigWithTCP creates a test configuration file with both HTTP and TCP routes
+func writeTestConfigWithTCP(t *testing.T, httpServices map[string]serviceConfig, tcpRoutes map[int]tcpRouteConfig) string {
+	t.Helper()
+
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	}
+
+	var sb strings.Builder
+	sb.WriteString("apiVersion: autotunnel/v1\n")
+	sb.WriteString("verbose: true\n")
+	sb.WriteString("auto_reload_config: false\n")
+	sb.WriteString("http:\n")
+	sb.WriteString(fmt.Sprintf("  listen: \":%d\"\n", 18989))
+	sb.WriteString(fmt.Sprintf("  idle_timeout: %s\n", idleTimeout))
+	sb.WriteString("  k8s:\n")
+	sb.WriteString(fmt.Sprintf("    kubeconfig: %s\n", kubeconfig))
+	sb.WriteString("    routes:\n")
+
+	for hostname, svc := range httpServices {
+		sb.WriteString(fmt.Sprintf("      %s:\n", hostname))
+		sb.WriteString(fmt.Sprintf("        context: %s\n", svc.Context))
+		sb.WriteString(fmt.Sprintf("        namespace: %s\n", svc.Namespace))
+		if svc.Pod != "" {
+			sb.WriteString(fmt.Sprintf("        pod: %s\n", svc.Pod))
+		} else {
+			sb.WriteString(fmt.Sprintf("        service: %s\n", svc.Service))
+		}
+		sb.WriteString(fmt.Sprintf("        port: %d\n", svc.Port))
+		if svc.Scheme != "" {
+			sb.WriteString(fmt.Sprintf("        scheme: %s\n", svc.Scheme))
+		}
+	}
+
+	if len(tcpRoutes) > 0 {
+		sb.WriteString("\ntcp:\n")
+		sb.WriteString(fmt.Sprintf("  idle_timeout: %s\n", idleTimeout))
+		sb.WriteString("  k8s:\n")
+		sb.WriteString(fmt.Sprintf("    kubeconfig: %s\n", kubeconfig))
+		sb.WriteString("    routes:\n")
+		for port, route := range tcpRoutes {
+			sb.WriteString(fmt.Sprintf("      %d:\n", port))
+			sb.WriteString(fmt.Sprintf("        context: %s\n", route.Context))
+			sb.WriteString(fmt.Sprintf("        namespace: %s\n", route.Namespace))
+			if route.Pod != "" {
+				sb.WriteString(fmt.Sprintf("        pod: %s\n", route.Pod))
+			} else {
+				sb.WriteString(fmt.Sprintf("        service: %s\n", route.Service))
+			}
+			sb.WriteString(fmt.Sprintf("        port: %d\n", route.Port))
+		}
+	}
+
+	// Write to temp file
+	tmpFile, err := os.CreateTemp("", "autotunnel-tcp-test-config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp config: %v", err)
+	}
+
+	if _, err := tmpFile.WriteString(sb.String()); err != nil {
+		t.Fatalf("Failed to write temp config: %v", err)
+	}
+	tmpFile.Close()
+
+	t.Cleanup(func() {
+		os.Remove(tmpFile.Name())
+	})
+
+	return tmpFile.Name()
 }
 
 // TestBasicProxyConnection tests that requests are proxied through a tunnel
@@ -306,7 +387,7 @@ func TestGracefulShutdown(t *testing.T) {
 	resp.Body.Close()
 
 	// Send interrupt signal
-	cmd.Process.Signal(os.Interrupt)
+	_ = cmd.Process.Signal(os.Interrupt)
 
 	// Wait for process to exit
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -323,7 +404,7 @@ func TestGracefulShutdown(t *testing.T) {
 		t.Logf("Process exited: %v", err)
 	case <-ctx.Done():
 		t.Error("Process did not exit within timeout")
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 	}
 }
 
@@ -574,7 +655,9 @@ func TestTLSPassthrough(t *testing.T) {
 	defer conn.Close()
 
 	// Set read/write deadlines
-	conn.SetDeadline(time.Now().Add(testTimeout))
+	if err := conn.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
 
 	// Send HTTP request over TLS
 	req := "GET / HTTP/1.1\r\nHost: nginx-tls.test\r\n\r\n"
@@ -730,8 +813,8 @@ http:
 		t.Fatalf("Failed to start autotunnel: %v", err)
 	}
 	defer func() {
-		cmd.Process.Signal(os.Interrupt)
-		cmd.Wait()
+		_ = cmd.Process.Signal(os.Interrupt)
+		_ = cmd.Wait()
 	}()
 
 	time.Sleep(startupWait)
@@ -1073,7 +1156,9 @@ func TestEmptyHostHeader(t *testing.T) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(testTimeout))
+	if err := conn.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
 
 	// Send HTTP request without Host header
 	req := "GET / HTTP/1.1\r\n\r\n"
@@ -1138,8 +1223,8 @@ http:
 		t.Fatalf("Failed to start autotunnel: %v", err)
 	}
 	defer func() {
-		cmd.Process.Signal(os.Interrupt)
-		cmd.Wait()
+		_ = cmd.Process.Signal(os.Interrupt)
+		_ = cmd.Wait()
 	}()
 
 	time.Sleep(startupWait)
@@ -1168,4 +1253,901 @@ http:
 	// Total elapsed time: ~8 seconds
 	// Tunnel should still be alive because we kept making requests
 	t.Log("All requests succeeded - idle timeout was reset by activity")
+}
+
+// ============================================================================
+// TCP Port-Forwarding Tests
+// ============================================================================
+
+// TestTCPBasicConnection tests basic TCP echo through tunnel
+func TestTCPBasicConnection(t *testing.T) {
+	configPath := writeTestConfigWithTCP(t,
+		map[string]serviceConfig{
+			"nginx.test": {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "nginx",
+				Port:      80,
+			},
+		},
+		map[int]tcpRouteConfig{
+			19000: {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "tcp-echo",
+				Port:      9999,
+			},
+		},
+	)
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	conn, err := net.DialTimeout("tcp", "localhost:19000", testTimeout)
+	if err != nil {
+		t.Fatalf("Failed to connect to TCP tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	testData := []byte("Hello, TCP tunnel!")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+}
+
+// TestTCPMultipleConnectionsReuseTunnel tests that multiple sequential connections reuse the same tunnel
+func TestTCPMultipleConnectionsReuseTunnel(t *testing.T) {
+	configPath := writeTestConfigWithTCP(t,
+		map[string]serviceConfig{
+			"nginx.test": {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "nginx",
+				Port:      80,
+			},
+		},
+		map[int]tcpRouteConfig{
+			19001: {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "tcp-echo",
+				Port:      9999,
+			},
+		},
+	)
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	for i := 0; i < 5; i++ {
+		conn, err := net.DialTimeout("tcp", "localhost:19001", testTimeout)
+		if err != nil {
+			t.Fatalf("Connection %d: Failed to connect: %v", i, err)
+		}
+
+		if err := conn.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+			conn.Close()
+			t.Fatalf("Connection %d: Failed to set deadline: %v", i, err)
+		}
+
+		testData := []byte(fmt.Sprintf("Connection %d", i))
+		if _, err := conn.Write(testData); err != nil {
+			conn.Close()
+			t.Fatalf("Connection %d: Failed to write: %v", i, err)
+		}
+
+		response := make([]byte, len(testData))
+		if _, err := io.ReadFull(conn, response); err != nil {
+			conn.Close()
+			t.Fatalf("Connection %d: Failed to read: %v", i, err)
+		}
+
+		if string(response) != string(testData) {
+			conn.Close()
+			t.Errorf("Connection %d: Response = %q, want %q", i, string(response), string(testData))
+		}
+
+		conn.Close()
+	}
+}
+
+// TestTCPConcurrentConnections tests multiple concurrent TCP connections
+func TestTCPConcurrentConnections(t *testing.T) {
+	configPath := writeTestConfigWithTCP(t,
+		map[string]serviceConfig{
+			"nginx.test": {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "nginx",
+				Port:      80,
+			},
+		},
+		map[int]tcpRouteConfig{
+			19002: {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "tcp-echo",
+				Port:      9999,
+			},
+		},
+	)
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	numConnections := 20
+	var wg sync.WaitGroup
+	errors := make(chan error, numConnections)
+
+	for i := 0; i < numConnections; i++ {
+		wg.Add(1)
+		go func(connNum int) {
+			defer wg.Done()
+
+			conn, err := net.DialTimeout("tcp", "localhost:19002", testTimeout)
+			if err != nil {
+				errors <- fmt.Errorf("connection %d: failed to connect: %v", connNum, err)
+				return
+			}
+			defer conn.Close()
+
+			if err := conn.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+				errors <- fmt.Errorf("connection %d: failed to set deadline: %v", connNum, err)
+				return
+			}
+
+			testData := []byte(fmt.Sprintf("Concurrent connection %d", connNum))
+			if _, err := conn.Write(testData); err != nil {
+				errors <- fmt.Errorf("connection %d: failed to write: %v", connNum, err)
+				return
+			}
+
+			response := make([]byte, len(testData))
+			if _, err := io.ReadFull(conn, response); err != nil {
+				errors <- fmt.Errorf("connection %d: failed to read: %v", connNum, err)
+				return
+			}
+
+			if string(response) != string(testData) {
+				errors <- fmt.Errorf("connection %d: response = %q, want %q", connNum, string(response), string(testData))
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	var allErrors []error
+	for err := range errors {
+		allErrors = append(allErrors, err)
+	}
+
+	if len(allErrors) > 0 {
+		for _, err := range allErrors {
+			t.Error(err)
+		}
+		t.Fatalf("%d out of %d concurrent TCP connections failed", len(allErrors), numConnections)
+	}
+}
+
+// TestTCPDirectPodTargeting tests TCP routing directly to a pod (no service)
+func TestTCPDirectPodTargeting(t *testing.T) {
+	configPath := writeTestConfigWithTCP(t,
+		map[string]serviceConfig{
+			"nginx.test": {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "nginx",
+				Port:      80,
+			},
+		},
+		map[int]tcpRouteConfig{
+			19003: {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Pod:       "tcp-echo-standalone",
+				Port:      9999,
+			},
+		},
+	)
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	conn, err := net.DialTimeout("tcp", "localhost:19003", testTimeout)
+	if err != nil {
+		t.Fatalf("Failed to connect to TCP tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	testData := []byte("Direct pod TCP test")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+}
+
+// TestTCPMultipleRoutes tests multiple TCP routes on different ports
+func TestTCPMultipleRoutes(t *testing.T) {
+	configPath := writeTestConfigWithTCP(t,
+		map[string]serviceConfig{
+			"nginx.test": {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "nginx",
+				Port:      80,
+			},
+		},
+		map[int]tcpRouteConfig{
+			19004: {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "tcp-echo",
+				Port:      9999,
+			},
+			19005: {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "tcp-echo-alt",
+				Port:      9998,
+			},
+		},
+	)
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	tests := []struct {
+		name string
+		port int
+		data string
+	}{
+		{"tcp-echo route", 19004, "Route 1 test data"},
+		{"tcp-echo-alt route", 19005, "Route 2 test data"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", tt.port), testTimeout)
+			if err != nil {
+				t.Fatalf("Failed to connect: %v", err)
+			}
+			defer conn.Close()
+
+			if err := conn.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+				t.Fatalf("Failed to set deadline: %v", err)
+			}
+
+			testData := []byte(tt.data)
+			if _, err := conn.Write(testData); err != nil {
+				t.Fatalf("Failed to write: %v", err)
+			}
+
+			response := make([]byte, len(testData))
+			if _, err := io.ReadFull(conn, response); err != nil {
+				t.Fatalf("Failed to read: %v", err)
+			}
+
+			if string(response) != string(testData) {
+				t.Errorf("Response = %q, want %q", string(response), string(testData))
+			}
+		})
+	}
+}
+
+// TestTCPBidirectionalData tests bidirectional data transfer with various sizes
+func TestTCPBidirectionalData(t *testing.T) {
+	configPath := writeTestConfigWithTCP(t,
+		map[string]serviceConfig{
+			"nginx.test": {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "nginx",
+				Port:      80,
+			},
+		},
+		map[int]tcpRouteConfig{
+			19006: {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "tcp-echo",
+				Port:      9999,
+			},
+		},
+	)
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	sizes := []int{100, 1000, 10000}
+
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
+			conn, err := net.DialTimeout("tcp", "localhost:19006", testTimeout)
+			if err != nil {
+				t.Fatalf("Failed to connect: %v", err)
+			}
+			defer conn.Close()
+
+			if err := conn.SetDeadline(time.Now().Add(testTimeout)); err != nil {
+				t.Fatalf("Failed to set deadline: %v", err)
+			}
+
+			// Generate test data of specified size
+			testData := make([]byte, size)
+			for i := range testData {
+				testData[i] = byte('A' + (i % 26))
+			}
+
+			if _, err := conn.Write(testData); err != nil {
+				t.Fatalf("Failed to write %d bytes: %v", size, err)
+			}
+
+			response := make([]byte, size)
+			if _, err := io.ReadFull(conn, response); err != nil {
+				t.Fatalf("Failed to read %d bytes: %v", size, err)
+			}
+
+			if string(response) != string(testData) {
+				t.Errorf("Response does not match sent data for size %d", size)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// Socat/Jump-Host TCP Forwarding Tests
+// ============================================================================
+
+// socatRouteConfig represents a socat (jump-host) route configuration for tests
+type socatRouteConfig struct {
+	Context    string
+	Namespace  string
+	ViaService string // Jump pod discovered via service (mutually exclusive with ViaPod)
+	ViaPod     string // Jump pod by direct name (mutually exclusive with ViaService)
+	Container  string // Optional container name for multi-container pods
+	TargetHost string // Target host (e.g., tcp-target.autotunnel-test.svc.cluster.local)
+	TargetPort int    // Target port
+}
+
+// writeTestConfigWithSocat creates a test configuration file with HTTP, TCP, and socat routes
+func writeTestConfigWithSocat(t *testing.T, httpServices map[string]serviceConfig, tcpRoutes map[int]tcpRouteConfig, socatRoutes map[int]socatRouteConfig) string {
+	t.Helper()
+
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	}
+
+	var sb strings.Builder
+	sb.WriteString("apiVersion: autotunnel/v1\n")
+	sb.WriteString("verbose: true\n")
+	sb.WriteString("auto_reload_config: false\n")
+	sb.WriteString("http:\n")
+	sb.WriteString(fmt.Sprintf("  listen: \":%d\"\n", 18989))
+	sb.WriteString(fmt.Sprintf("  idle_timeout: %s\n", idleTimeout))
+	sb.WriteString("  k8s:\n")
+	sb.WriteString(fmt.Sprintf("    kubeconfig: %s\n", kubeconfig))
+	sb.WriteString("    routes:\n")
+
+	// Write HTTP routes (at least one required to prevent validation errors)
+	if len(httpServices) == 0 {
+		// Add a dummy HTTP route
+		sb.WriteString("      dummy.test:\n")
+		sb.WriteString(fmt.Sprintf("        context: %s\n", getTestContext()))
+		sb.WriteString("        namespace: autotunnel-test\n")
+		sb.WriteString("        service: nginx\n")
+		sb.WriteString("        port: 80\n")
+	} else {
+		for hostname, svc := range httpServices {
+			sb.WriteString(fmt.Sprintf("      %s:\n", hostname))
+			sb.WriteString(fmt.Sprintf("        context: %s\n", svc.Context))
+			sb.WriteString(fmt.Sprintf("        namespace: %s\n", svc.Namespace))
+			if svc.Pod != "" {
+				sb.WriteString(fmt.Sprintf("        pod: %s\n", svc.Pod))
+			} else {
+				sb.WriteString(fmt.Sprintf("        service: %s\n", svc.Service))
+			}
+			sb.WriteString(fmt.Sprintf("        port: %d\n", svc.Port))
+			if svc.Scheme != "" {
+				sb.WriteString(fmt.Sprintf("        scheme: %s\n", svc.Scheme))
+			}
+		}
+	}
+
+	// Write TCP section if we have routes or socat
+	if len(tcpRoutes) > 0 || len(socatRoutes) > 0 {
+		sb.WriteString("\ntcp:\n")
+		sb.WriteString(fmt.Sprintf("  idle_timeout: %s\n", idleTimeout))
+		sb.WriteString("  k8s:\n")
+		sb.WriteString(fmt.Sprintf("    kubeconfig: %s\n", kubeconfig))
+
+		// Write direct TCP routes
+		if len(tcpRoutes) > 0 {
+			sb.WriteString("    routes:\n")
+			for port, route := range tcpRoutes {
+				sb.WriteString(fmt.Sprintf("      %d:\n", port))
+				sb.WriteString(fmt.Sprintf("        context: %s\n", route.Context))
+				sb.WriteString(fmt.Sprintf("        namespace: %s\n", route.Namespace))
+				if route.Pod != "" {
+					sb.WriteString(fmt.Sprintf("        pod: %s\n", route.Pod))
+				} else {
+					sb.WriteString(fmt.Sprintf("        service: %s\n", route.Service))
+				}
+				sb.WriteString(fmt.Sprintf("        port: %d\n", route.Port))
+			}
+		}
+
+		// Write socat (jump-host) routes
+		if len(socatRoutes) > 0 {
+			sb.WriteString("    socat:\n")
+			for port, route := range socatRoutes {
+				sb.WriteString(fmt.Sprintf("      %d:\n", port))
+				sb.WriteString(fmt.Sprintf("        context: %s\n", route.Context))
+				sb.WriteString(fmt.Sprintf("        namespace: %s\n", route.Namespace))
+				sb.WriteString("        via:\n")
+				if route.ViaPod != "" {
+					sb.WriteString(fmt.Sprintf("          pod: %s\n", route.ViaPod))
+				} else {
+					sb.WriteString(fmt.Sprintf("          service: %s\n", route.ViaService))
+				}
+				if route.Container != "" {
+					sb.WriteString(fmt.Sprintf("          container: %s\n", route.Container))
+				}
+				sb.WriteString("        target:\n")
+				sb.WriteString(fmt.Sprintf("          host: %s\n", route.TargetHost))
+				sb.WriteString(fmt.Sprintf("          port: %d\n", route.TargetPort))
+			}
+		}
+	}
+
+	// Write to temp file
+	tmpFile, err := os.CreateTemp("", "autotunnel-socat-test-config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp config: %v", err)
+	}
+
+	if _, err := tmpFile.WriteString(sb.String()); err != nil {
+		t.Fatalf("Failed to write temp config: %v", err)
+	}
+	tmpFile.Close()
+
+	t.Cleanup(func() {
+		os.Remove(tmpFile.Name())
+	})
+
+	return tmpFile.Name()
+}
+
+// TestSocatBasicConnection tests basic connectivity through a jump pod via service
+func TestSocatBasicConnection(t *testing.T) {
+	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+		19100: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaService: "bastion-jump",
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	conn, err := net.DialTimeout("tcp", "localhost:19100", testTimeout)
+	if err != nil {
+		t.Fatalf("Failed to connect to socat tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	testData := []byte("Hello via jump host!\n")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+}
+
+// TestSocatViaPod tests jump-host routing using direct pod targeting
+func TestSocatViaPod(t *testing.T) {
+	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+		19101: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaPod:     "bastion-standalone",
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	conn, err := net.DialTimeout("tcp", "localhost:19101", testTimeout)
+	if err != nil {
+		t.Fatalf("Failed to connect to socat tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	testData := []byte("Direct pod jump test!\n")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+}
+
+// TestSocatBidirectionalData tests bidirectional data transfer with various sizes through jump host
+func TestSocatBidirectionalData(t *testing.T) {
+	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+		19102: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaService: "bastion-jump",
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	sizes := []int{100, 1000, 5000}
+
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
+			conn, err := net.DialTimeout("tcp", "localhost:19102", testTimeout)
+			if err != nil {
+				t.Fatalf("Failed to connect: %v", err)
+			}
+			defer conn.Close()
+
+			if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				t.Fatalf("Failed to set deadline: %v", err)
+			}
+
+			// Generate test data of specified size
+			testData := make([]byte, size)
+			for i := range testData {
+				testData[i] = byte('A' + (i % 26))
+			}
+
+			if _, err := conn.Write(testData); err != nil {
+				t.Fatalf("Failed to write %d bytes: %v", size, err)
+			}
+
+			response := make([]byte, size)
+			if _, err := io.ReadFull(conn, response); err != nil {
+				t.Fatalf("Failed to read %d bytes: %v", size, err)
+			}
+
+			if string(response) != string(testData) {
+				t.Errorf("Response does not match sent data for size %d", size)
+			}
+		})
+	}
+}
+
+// TestSocatMultipleConnections tests multiple sequential connections through jump host
+func TestSocatMultipleConnections(t *testing.T) {
+	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+		19103: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaService: "bastion-jump",
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	for i := 0; i < 5; i++ {
+		t.Run(fmt.Sprintf("connection_%d", i), func(t *testing.T) {
+			conn, err := net.DialTimeout("tcp", "localhost:19103", testTimeout)
+			if err != nil {
+				t.Fatalf("Connection %d: Failed to connect: %v", i, err)
+			}
+			defer conn.Close()
+
+			if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				t.Fatalf("Connection %d: Failed to set deadline: %v", i, err)
+			}
+
+			testData := []byte(fmt.Sprintf("Connection %d test data\n", i))
+			if _, err := conn.Write(testData); err != nil {
+				t.Fatalf("Connection %d: Failed to write: %v", i, err)
+			}
+
+			response := make([]byte, len(testData))
+			if _, err := io.ReadFull(conn, response); err != nil {
+				t.Fatalf("Connection %d: Failed to read: %v", i, err)
+			}
+
+			if string(response) != string(testData) {
+				t.Errorf("Connection %d: Response = %q, want %q", i, string(response), string(testData))
+			}
+		})
+	}
+}
+
+// TestSocatMultipleRoutes tests multiple socat routes on different ports
+func TestSocatMultipleRoutes(t *testing.T) {
+	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+		19104: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaService: "bastion-jump",
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+		19105: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaPod:     "bastion-standalone",
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	tests := []struct {
+		name string
+		port int
+		data string
+	}{
+		{"via-service", 19104, "Route via service\n"},
+		{"via-pod", 19105, "Route via direct pod\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", tt.port), testTimeout)
+			if err != nil {
+				t.Fatalf("Failed to connect: %v", err)
+			}
+			defer conn.Close()
+
+			if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				t.Fatalf("Failed to set deadline: %v", err)
+			}
+
+			testData := []byte(tt.data)
+			if _, err := conn.Write(testData); err != nil {
+				t.Fatalf("Failed to write: %v", err)
+			}
+
+			response := make([]byte, len(testData))
+			if _, err := io.ReadFull(conn, response); err != nil {
+				t.Fatalf("Failed to read: %v", err)
+			}
+
+			if string(response) != string(testData) {
+				t.Errorf("Response = %q, want %q", string(response), string(testData))
+			}
+		})
+	}
+}
+
+// TestSocatConcurrentConnections tests multiple concurrent connections through jump host
+func TestSocatConcurrentConnections(t *testing.T) {
+	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+		19106: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaService: "bastion-jump",
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	numConnections := 10
+	var wg sync.WaitGroup
+	errors := make(chan error, numConnections)
+
+	for i := 0; i < numConnections; i++ {
+		wg.Add(1)
+		go func(connNum int) {
+			defer wg.Done()
+
+			conn, err := net.DialTimeout("tcp", "localhost:19106", testTimeout)
+			if err != nil {
+				errors <- fmt.Errorf("connection %d: failed to connect: %v", connNum, err)
+				return
+			}
+			defer conn.Close()
+
+			if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				errors <- fmt.Errorf("connection %d: failed to set deadline: %v", connNum, err)
+				return
+			}
+
+			testData := []byte(fmt.Sprintf("Concurrent connection %d\n", connNum))
+			if _, err := conn.Write(testData); err != nil {
+				errors <- fmt.Errorf("connection %d: failed to write: %v", connNum, err)
+				return
+			}
+
+			response := make([]byte, len(testData))
+			if _, err := io.ReadFull(conn, response); err != nil {
+				errors <- fmt.Errorf("connection %d: failed to read: %v", connNum, err)
+				return
+			}
+
+			if string(response) != string(testData) {
+				errors <- fmt.Errorf("connection %d: response = %q, want %q", connNum, string(response), string(testData))
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	var allErrors []error
+	for err := range errors {
+		allErrors = append(allErrors, err)
+	}
+
+	if len(allErrors) > 0 {
+		for _, err := range allErrors {
+			t.Error(err)
+		}
+		t.Fatalf("%d out of %d concurrent socat connections failed", len(allErrors), numConnections)
+	}
+}
+
+// TestSocatMixedWithTCPRoutes tests that socat routes work alongside direct TCP routes
+func TestSocatMixedWithTCPRoutes(t *testing.T) {
+	configPath := writeTestConfigWithSocat(t, nil,
+		map[int]tcpRouteConfig{
+			19107: {
+				Context:   getTestContext(),
+				Namespace: "autotunnel-test",
+				Service:   "tcp-echo",
+				Port:      9999,
+			},
+		},
+		map[int]socatRouteConfig{
+			19108: {
+				Context:    getTestContext(),
+				Namespace:  "autotunnel-test",
+				ViaService: "bastion-jump",
+				TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+				TargetPort: 3306,
+			},
+		},
+	)
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the services time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	// Test direct TCP route
+	t.Run("direct-tcp-route", func(t *testing.T) {
+		conn, err := net.DialTimeout("tcp", "localhost:19107", testTimeout)
+		if err != nil {
+			t.Fatalf("Failed to connect to direct TCP route: %v", err)
+		}
+		defer conn.Close()
+
+		if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			t.Fatalf("Failed to set deadline: %v", err)
+		}
+
+		testData := []byte("Direct TCP route test\n")
+		if _, err := conn.Write(testData); err != nil {
+			t.Fatalf("Failed to write: %v", err)
+		}
+
+		response := make([]byte, len(testData))
+		if _, err := io.ReadFull(conn, response); err != nil {
+			t.Fatalf("Failed to read: %v", err)
+		}
+
+		if string(response) != string(testData) {
+			t.Errorf("Response = %q, want %q", string(response), string(testData))
+		}
+	})
+
+	// Test socat route
+	t.Run("socat-route", func(t *testing.T) {
+		conn, err := net.DialTimeout("tcp", "localhost:19108", testTimeout)
+		if err != nil {
+			t.Fatalf("Failed to connect to socat route: %v", err)
+		}
+		defer conn.Close()
+
+		if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			t.Fatalf("Failed to set deadline: %v", err)
+		}
+
+		testData := []byte("Socat route test\n")
+		if _, err := conn.Write(testData); err != nil {
+			t.Fatalf("Failed to write: %v", err)
+		}
+
+		response := make([]byte, len(testData))
+		if _, err := io.ReadFull(conn, response); err != nil {
+			t.Fatalf("Failed to read: %v", err)
+		}
+
+		if string(response) != string(testData) {
+			t.Errorf("Response = %q, want %q", string(response), string(testData))
+		}
+	})
 }

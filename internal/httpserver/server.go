@@ -13,12 +13,10 @@ import (
 	"github.com/atas/autotunnel/internal/tunnelmgr"
 )
 
-// Manager provides tunnel lifecycle management
 type Manager interface {
 	GetOrCreateTunnel(hostname string, scheme string) (tunnelmgr.TunnelHandle, error)
 }
 
-// Server handles both HTTP and TLS passthrough on a single port
 type Server struct {
 	config               *config.Config
 	manager              Manager
@@ -28,9 +26,8 @@ type Server struct {
 	tlsErrorCertProvider *tlsErrorCertProvider
 }
 
-// NewServer creates a new unified server
 func NewServer(cfg *config.Config, mgr Manager) *Server {
-	// Initialize TLS error cert provider (ignore errors - will just not show TLS error pages if it fails)
+	// cert generation can fail (rare) - we just won't show TLS error pages then
 	certProvider, _ := newTLSErrorCertProvider()
 
 	return &Server{
@@ -41,7 +38,6 @@ func NewServer(cfg *config.Config, mgr Manager) *Server {
 	}
 }
 
-// Start begins listening and handling connections
 func (s *Server) Start() error {
 	mux, err := newMuxListener(s.config.HTTP.ListenAddr)
 	if err != nil {
@@ -49,7 +45,6 @@ func (s *Server) Start() error {
 	}
 	s.listener = mux
 
-	// Create HTTP server using the HTTP-only listener
 	s.server = &http.Server{
 		Handler:      s,
 		ReadTimeout:  30 * time.Second,
@@ -57,10 +52,9 @@ func (s *Server) Start() error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start HTTP server in goroutine
 	go func() {
 		err := s.server.Serve(mux.httpListener())
-		// Ignore expected errors during shutdown
+		// these errors are expected during shutdown, don't spam the logs
 		if err != nil && err != http.ErrServerClosed && !strings.Contains(err.Error(), "use of closed network connection") {
 			log.Printf("HTTP server error: %v", err)
 		}
@@ -68,7 +62,6 @@ func (s *Server) Start() error {
 
 	log.Printf("Server listening on %s (HTTP + TLS passthrough)", s.config.HTTP.ListenAddr)
 
-	// Accept loop - route connections based on protocol
 	for {
 		conn, err := mux.Listener.Accept()
 		if err != nil {
@@ -89,10 +82,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 	peekConn := newPeekConn(conn)
 
 	if peekConn.isTLS() {
-		// Handle as TLS passthrough
 		s.handleTLSConnection(peekConn)
 	} else {
-		// Pass to HTTP server
 		select {
 		case s.listener.httpConns <- peekConn:
 		case <-s.done:
@@ -101,15 +92,12 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-// Shutdown gracefully stops the server
 func (s *Server) Shutdown(ctx context.Context) error {
-	// 1. Signal accept loop to stop
 	close(s.done)
-	// 2. Close listener - this unblocks both the main Accept() and httpListener.Accept()
+	// Close listener first - unblocks Accept() calls
 	if s.listener != nil {
 		s.listener.Close()
 	}
-	// 3. Force close HTTP server (don't wait for connections)
 	if s.server != nil {
 		s.server.Close()
 	}

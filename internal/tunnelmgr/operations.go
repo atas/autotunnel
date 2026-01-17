@@ -6,25 +6,22 @@ import (
 	"time"
 )
 
-// GetOrCreateTunnel returns an existing tunnel or creates a new one
 func (m *Manager) GetOrCreateTunnel(hostname string, scheme string) (TunnelHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check if tunnel exists and is running
 	if tunnel, ok := m.tunnels[hostname]; ok {
 		if tunnel.IsRunning() {
 			tunnel.Touch()
 			return tunnel, nil
 		}
-		// Tunnel exists but not running, remove it
+		// dead tunnel, clean it up
 		delete(m.tunnels, hostname)
 	}
 
-	// Look up route config (static routes first)
+	// static routes take priority, then try dynamic pattern matching
 	routeConfig, ok := m.config.HTTP.K8s.Routes[hostname]
 	if !ok {
-		// Try dynamic host resolution
 		if parsed, valid := ParseDynamicHostname(hostname, m.config.HTTP.K8s.DynamicHost, scheme); valid {
 			routeConfig = *parsed
 			ok = true
@@ -36,20 +33,17 @@ func (m *Manager) GetOrCreateTunnel(hostname string, scheme string) (TunnelHandl
 		return nil, fmt.Errorf("no route configured for hostname: %s", hostname)
 	}
 
-	// Get or create shared k8s client for this context
 	clientset, restConfig, err := m.getClientsetAndConfig(m.config.HTTP.K8s.ResolvedKubeconfigs, routeConfig.Context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s client for context %s: %w", routeConfig.Context, err)
 	}
 
-	// Create new tunnel with shared k8s resources
 	tun := m.tunnelFactory(hostname, routeConfig, clientset, restConfig, m.config.HTTP.ListenAddr, m.config.Verbose)
 	m.tunnels[hostname] = tun
 
 	return tun, nil
 }
 
-// idleCleanupLoop periodically checks for and closes idle tunnels
 func (m *Manager) idleCleanupLoop() {
 	defer m.wg.Done()
 
@@ -66,8 +60,12 @@ func (m *Manager) idleCleanupLoop() {
 	}
 }
 
-// cleanupIdleTunnels closes tunnels that have exceeded the idle timeout
 func (m *Manager) cleanupIdleTunnels() {
+	m.cleanupIdleHTTPTunnels()
+	m.cleanupIdleTCPTunnels()
+}
+
+func (m *Manager) cleanupIdleHTTPTunnels() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -78,6 +76,32 @@ func (m *Manager) cleanupIdleTunnels() {
 				tunnel.Scheme(), hostname, m.config.HTTP.ListenAddr, idleDur)
 			tunnel.Stop()
 			delete(m.tunnels, hostname)
+		}
+	}
+}
+
+func (m *Manager) cleanupIdleTCPTunnels() {
+	m.tcpTunnelsMu.Lock()
+	defer m.tcpTunnelsMu.Unlock()
+
+	// TCP idle timeout falls back to HTTP idle timeout if not specified
+	tcpIdleTimeout := m.config.TCP.IdleTimeout
+	if tcpIdleTimeout == 0 {
+		tcpIdleTimeout = m.config.HTTP.IdleTimeout
+	}
+
+	for port, tunnel := range m.tcpTunnels {
+		if tunnel.IsRunning() && tunnel.IdleDuration() > tcpIdleTimeout {
+			target := m.config.TCP.K8s.Routes[port]
+			targetName := target.Service
+			if target.Pod != "" {
+				targetName = target.Pod
+			}
+			idleDur := tunnel.IdleDuration().Round(time.Second)
+			log.Printf("Tunnel stopped: tcp://localhost:%d -> %s/%s (idle for %v)",
+				port, target.Namespace, targetName, idleDur)
+			tunnel.Stop()
+			delete(m.tcpTunnels, port)
 		}
 	}
 }

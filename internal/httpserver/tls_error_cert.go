@@ -12,27 +12,23 @@ import (
 	"time"
 )
 
-// tlsErrorCertProvider generates self-signed certificates for TLS error pages.
-// It creates a CA certificate at initialization and generates hostname-specific
-// leaf certificates on demand.
+// tlsErrorCertProvider generates on-the-fly certs for TLS error pages.
+// Creates a CA once, then mints short-lived per-hostname certs as needed.
 type tlsErrorCertProvider struct {
 	caCert *x509.Certificate
 	caKey  *ecdsa.PrivateKey
 
-	// Cache for generated certificates (hostname -> cert)
 	certCache map[string]*tls.Certificate
 	cacheMu   sync.RWMutex
 }
 
-// newTLSErrorCertProvider creates a new certificate provider with a fresh CA.
 func newTLSErrorCertProvider() (*tlsErrorCertProvider, error) {
-	// Generate CA private key (ECDSA P-256 for speed)
+	// ECDSA P-256 is fast and widely supported
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create CA certificate template
 	caTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
@@ -46,7 +42,6 @@ func newTLSErrorCertProvider() (*tlsErrorCertProvider, error) {
 		IsCA:                  true,
 	}
 
-	// Self-sign the CA certificate
 	caCertDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
 	if err != nil {
 		return nil, err
@@ -64,10 +59,7 @@ func newTLSErrorCertProvider() (*tlsErrorCertProvider, error) {
 	}, nil
 }
 
-// GetCertificate returns a certificate for the given hostname.
-// Certificates are cached and reused for subsequent requests.
 func (p *tlsErrorCertProvider) GetCertificate(hostname string) (*tls.Certificate, error) {
-	// Check cache first
 	p.cacheMu.RLock()
 	if cert, ok := p.certCache[hostname]; ok {
 		p.cacheMu.RUnlock()
@@ -75,13 +67,12 @@ func (p *tlsErrorCertProvider) GetCertificate(hostname string) (*tls.Certificate
 	}
 	p.cacheMu.RUnlock()
 
-	// Generate new certificate
 	cert, err := p.generateCert(hostname)
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache it (with size limit to prevent memory issues)
+	// cap cache size to avoid unbounded memory growth
 	p.cacheMu.Lock()
 	if len(p.certCache) < 1000 {
 		p.certCache[hostname] = cert
@@ -92,13 +83,11 @@ func (p *tlsErrorCertProvider) GetCertificate(hostname string) (*tls.Certificate
 }
 
 func (p *tlsErrorCertProvider) generateCert(hostname string) (*tls.Certificate, error) {
-	// Generate leaf certificate key
 	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create leaf certificate template
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject: pkix.Name{
@@ -107,12 +96,11 @@ func (p *tlsErrorCertProvider) generateCert(hostname string) (*tls.Certificate, 
 		},
 		DNSNames:    []string{hostname},
 		NotBefore:   time.Now(),
-		NotAfter:    time.Now().Add(24 * time.Hour), // Short-lived
+		NotAfter:    time.Now().Add(24 * time.Hour), // short-lived, only for error display
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 
-	// Sign with CA
 	certDER, err := x509.CreateCertificate(rand.Reader, template, p.caCert, &leafKey.PublicKey, p.caKey)
 	if err != nil {
 		return nil, err

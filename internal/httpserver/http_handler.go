@@ -11,7 +11,6 @@ import (
 	"strings"
 )
 
-// ServeHTTP implements http.Handler for HTTP requests
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
 	if idx := strings.LastIndex(host, ":"); idx != -1 {

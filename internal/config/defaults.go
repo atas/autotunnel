@@ -5,12 +5,9 @@ import (
 	"os"
 )
 
-// defaultConfigTemplate is the template for a new config file
-//
 //go:embed default_config.yaml
 var defaultConfigTemplate string
 
-// DefaultConfig returns configuration with sensible defaults for optional fields
 func DefaultConfig() *Config {
 	return &Config{
 		HTTP: HTTPConfig{
@@ -19,10 +16,14 @@ func DefaultConfig() *Config {
 				Routes:     make(map[string]K8sRouteConfig),
 			},
 		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Routes: make(map[int]TCPRouteConfig),
+			},
+		},
 	}
 }
 
-// CreateDefaultConfig creates a new config file with example content
 func CreateDefaultConfig(path string) error {
 	return os.WriteFile(path, []byte(defaultConfigTemplate), 0644)
 }

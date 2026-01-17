@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// tlsErrorType represents different error types for TLS connections.
 type tlsErrorType int
 
 const (
@@ -31,20 +30,17 @@ func (e tlsErrorType) statusCode() int {
 	}
 }
 
-// sendTLSErrorPage completes a TLS handshake and sends an HTTP error page.
-// It uses the stored ClientHello bytes to properly complete the handshake.
+// sendTLSErrorPage generates a self-signed cert, completes TLS handshake,
+// and returns an HTTP error. Without this, browsers just show "connection reset".
 func (s *Server) sendTLSErrorPage(conn net.Conn, clientHello []byte, hostname string, errType tlsErrorType, errMsg string) {
-	// If we don't have the cert provider, just close
 	if s.tlsErrorCertProvider == nil {
 		return
 	}
 
-	// If no hostname was extracted, use a generic one
 	if hostname == "" {
 		hostname = "unknown.localhost"
 	}
 
-	// Get or generate certificate for this hostname
 	cert, err := s.tlsErrorCertProvider.GetCertificate(hostname)
 	if err != nil {
 		if s.config.Verbose {
@@ -56,19 +52,17 @@ func (s *Server) sendTLSErrorPage(conn net.Conn, clientHello []byte, hostname st
 		return
 	}
 
-	// Create TLS config with our certificate
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{*cert},
 		MinVersion:   tls.VersionTLS12,
 	}
 
-	// Create a wrapper that replays the ClientHello
+	// we already consumed the ClientHello, need to replay it for TLS handshake
 	replayConn := &replayConn{
 		Conn:    conn,
 		initial: clientHello,
 	}
 
-	// Perform TLS handshake
 	tlsConn := tls.Server(replayConn, tlsConfig)
 	defer tlsConn.Close()
 
@@ -83,11 +77,9 @@ func (s *Server) sendTLSErrorPage(conn net.Conn, clientHello []byte, hostname st
 		return
 	}
 
-	// Generate and send error page
 	statusCode := errType.statusCode()
 	body := renderErrorPage(statusCode, hostname, errMsg)
 
-	// Write HTTP response
 	response := fmt.Sprintf(
 		"HTTP/1.1 %d %s\r\n"+
 			"Content-Type: text/plain; charset=utf-8\r\n"+
@@ -103,8 +95,6 @@ func (s *Server) sendTLSErrorPage(conn net.Conn, clientHello []byte, hostname st
 	_, _ = tlsConn.Write(body)
 }
 
-// replayConn wraps a connection and replays initial bytes on first read.
-// This is used to replay the ClientHello bytes during the TLS handshake.
 type replayConn struct {
 	net.Conn
 	initial  []byte

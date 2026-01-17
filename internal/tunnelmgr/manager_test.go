@@ -391,3 +391,142 @@ func TestGetOrCreateTunnel_DynamicRouteResolution(t *testing.T) {
 		t.Errorf("Expected context 'microk8s', got %q", capturedConfig.Context)
 	}
 }
+
+func TestManager_ConcurrentGetOrCreateTunnel(t *testing.T) {
+	routes := map[string]config.K8sRouteConfig{
+		"test1.localhost": {Context: "test", Namespace: "default", Service: "test1", Port: 80},
+		"test2.localhost": {Context: "test", Namespace: "default", Service: "test2", Port: 80},
+	}
+	cfg := testConfig(routes)
+	m := NewManager(cfg)
+
+	// Pre-populate k8s client cache
+	m.k8sClients["test"] = &k8sClient{clientset: nil, restConfig: nil}
+
+	// Set up factory
+	m.tunnelFactory = func(hostname string, cfg config.K8sRouteConfig,
+		clientset kubernetes.Interface, restConfig *rest.Config,
+		listenAddr string, verbose bool) TunnelHandle {
+		return newMockTunnel(false)
+	}
+
+	var wg sync.WaitGroup
+	const goroutines = 50
+
+	// Concurrent access should be safe
+	for range goroutines {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = m.GetOrCreateTunnel("test1.localhost", "http")
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = m.GetOrCreateTunnel("test2.localhost", "http")
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestManager_CleanupIdleTunnels_NoTunnels(t *testing.T) {
+	cfg := testConfig(map[string]config.K8sRouteConfig{})
+	m := NewManager(cfg)
+
+	// Should not panic with empty tunnels map
+	m.cleanupIdleTunnels()
+
+	if len(m.tunnels) != 0 {
+		t.Errorf("Expected 0 tunnels, got %d", len(m.tunnels))
+	}
+}
+
+func TestManager_CleanupIdleTCPTunnels(t *testing.T) {
+	cfg := &config.Config{
+		HTTP: config.HTTPConfig{
+			IdleTimeout: 30 * time.Minute,
+		},
+		TCP: config.TCPConfig{
+			IdleTimeout: 0, // Should fall back to HTTP idle timeout
+			K8s: config.TCPK8sConfig{
+				Routes: map[int]config.TCPRouteConfig{
+					5432: {Context: "test", Namespace: "default", Service: "postgres", Port: 5432},
+				},
+			},
+		},
+	}
+	m := NewManager(cfg)
+
+	// Add idle TCP tunnel
+	idleTunnel := newMockTunnel(true)
+	idleTunnel.idleDuration = 60 * time.Minute // > 30m timeout (uses HTTP fallback)
+	m.tcpTunnels[5432] = idleTunnel
+
+	// Active TCP tunnel
+	activeTunnel := newMockTunnel(true)
+	activeTunnel.idleDuration = 10 * time.Minute
+	m.tcpTunnels[3306] = activeTunnel
+
+	// Act
+	m.cleanupIdleTunnels()
+
+	// Idle tunnel should be stopped
+	if !idleTunnel.wasStopped() {
+		t.Error("Expected idle TCP tunnel to be stopped")
+	}
+	if activeTunnel.wasStopped() {
+		t.Error("Expected active TCP tunnel to NOT be stopped")
+	}
+}
+
+func TestManager_ListTunnels_Empty(t *testing.T) {
+	cfg := testConfig(map[string]config.K8sRouteConfig{})
+	m := NewManager(cfg)
+
+	infos := m.ListTunnels()
+
+	if len(infos) != 0 {
+		t.Errorf("Expected 0 tunnel infos, got %d", len(infos))
+	}
+}
+
+func TestManager_ActiveTunnels_MixedStates(t *testing.T) {
+	cfg := testConfig(map[string]config.K8sRouteConfig{})
+	m := NewManager(cfg)
+
+	// Add tunnels in various states
+	runningTunnel := newMockTunnel(true)
+	stoppedTunnel := newMockTunnel(false)
+
+	m.tunnels["running.localhost"] = runningTunnel
+	m.tunnels["stopped.localhost"] = stoppedTunnel
+
+	count := m.ActiveTunnels()
+
+	if count != 1 {
+		t.Errorf("Expected 1 active tunnel, got %d", count)
+	}
+}
+
+func TestManager_UpdateConfig_NoChanges(t *testing.T) {
+	routes := map[string]config.K8sRouteConfig{
+		"test.localhost": {Context: "test", Namespace: "default", Service: "test", Port: 80},
+	}
+	cfg := testConfig(routes)
+	m := NewManager(cfg)
+
+	// Add a running tunnel
+	runningTunnel := newMockTunnel(true)
+	m.tunnels["test.localhost"] = runningTunnel
+
+	// Update with same config
+	m.UpdateConfig(cfg)
+
+	// Tunnel should still be there and not stopped
+	if runningTunnel.wasStopped() {
+		t.Error("Tunnel should not be stopped when route remains")
+	}
+	if _, exists := m.tunnels["test.localhost"]; !exists {
+		t.Error("Tunnel should still exist")
+	}
+}

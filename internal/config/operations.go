@@ -3,12 +3,10 @@ package config
 import (
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 )
 
-// ConfigExists checks if the config file exists
-func ConfigExists(path string) bool {
+func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
@@ -21,46 +19,53 @@ func (c *Config) ShouldAutoReload() bool {
 	return *c.AutoReloadConfig
 }
 
-// LogRoutes prints the configured routes in a formatted table
-func (c *Config) LogRoutes() {
+func (c *Config) PrintRoutes() {
 	fmt.Printf("Routes (%d):\n", len(c.HTTP.K8s.Routes))
-
-	type routeInfo struct {
-		hostname string
-		local    string
-		target   string
-		context  string
-	}
-	var routes []routeInfo
-	maxLocal, maxTarget := 0, 0
+	parts := strings.Split(c.HTTP.ListenAddr, ":")
+	port := parts[len(parts)-1]
 	for hostname, route := range c.HTTP.K8s.Routes {
 		scheme := route.Scheme
 		if scheme == "" {
 			scheme = "http"
 		}
-		// Extract port from ListenAddr (handles ":8989" and "127.0.0.1:8989")
-		parts := strings.Split(c.HTTP.ListenAddr, ":")
-		port := parts[len(parts)-1]
-		local := fmt.Sprintf("%s://%s:%s", scheme, hostname, port)
 		var target string
 		if route.Pod != "" {
 			target = fmt.Sprintf("pod/%s:%d", route.Pod, route.Port)
 		} else {
 			target = fmt.Sprintf("%s:%d", route.Service, route.Port)
 		}
-		context := fmt.Sprintf("%s/%s", route.Context, route.Namespace)
-		routes = append(routes, routeInfo{hostname, local, target, context})
-		if len(local) > maxLocal {
-			maxLocal = len(local)
-		}
-		if len(target) > maxTarget {
-			maxTarget = len(target)
-		}
+		fmt.Printf("  %s://%s:%s -> %s (%s/%s)\n", scheme, hostname, port, target, route.Context, route.Namespace)
 	}
-	sort.Slice(routes, func(i, j int) bool {
-		return routes[i].hostname < routes[j].hostname
-	})
-	for _, r := range routes {
-		fmt.Printf("  %-*s  ->  %-*s  (%s)\n", maxLocal, r.local, maxTarget, r.target, r.context)
+}
+
+func (c *Config) PrintTCPRoutes() {
+	if len(c.TCP.K8s.Routes) == 0 {
+		return
+	}
+	fmt.Printf("TCP Routes (%d):\n", len(c.TCP.K8s.Routes))
+	for localPort, route := range c.TCP.K8s.Routes {
+		var target string
+		if route.Pod != "" {
+			target = fmt.Sprintf("pod/%s:%d", route.Pod, route.Port)
+		} else {
+			target = fmt.Sprintf("%s:%d", route.Service, route.Port)
+		}
+		fmt.Printf("  :%d -> %s (%s/%s)\n", localPort, target, route.Context, route.Namespace)
+	}
+}
+
+func (c *Config) PrintSocatRoutes() {
+	if len(c.TCP.K8s.Socat) == 0 {
+		return
+	}
+	fmt.Printf("Socat Routes (%d):\n", len(c.TCP.K8s.Socat))
+	for localPort, route := range c.TCP.K8s.Socat {
+		var via string
+		if route.Via.Pod != "" {
+			via = fmt.Sprintf("pod/%s", route.Via.Pod)
+		} else {
+			via = fmt.Sprintf("svc/%s", route.Via.Service)
+		}
+		fmt.Printf("  :%d via %s -> %s:%d (%s/%s)\n", localPort, via, route.Target.Host, route.Target.Port, route.Context, route.Namespace)
 	}
 }

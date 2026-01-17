@@ -15,39 +15,33 @@ import (
 	"k8s.io/client-go/transport/spdy"
 )
 
-// startPortForward establishes the port-forward connection using client-go
 func (t *Tunnel) startPortForward(ctx context.Context) error {
-	// Discover target pod and port
 	podName, targetPort, err := t.discoverTargetPod(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Create port forwarder
 	fw, errChan, err := t.createPortForwarder(podName, targetPort)
 	if err != nil {
 		return err
 	}
 
-	// Wait for ready and handle lifecycle
 	return t.waitForReady(ctx, fw, errChan)
 }
 
-// discoverTargetPod returns the pod name and resolved port for port-forwarding.
-// For direct pod targeting, it returns the configured pod name.
-// For service targeting, it discovers a ready pod via the service selector.
+// discoverTargetPod figures out which pod to connect to.
+// With pod: config, we use it directly. With service: config, we look up the
+// service's selector labels and find a ready pod that matches.
 func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port int, err error) {
 	port = t.config.Port
 
 	if t.config.Pod != "" {
-		// Direct pod targeting - skip service lookup and pod discovery
 		if t.verbose {
 			log.Printf("[%s] Direct pod targeting: %s/%s port %d", t.hostname, t.config.Namespace, t.config.Pod, port)
 		}
 		return t.config.Pod, port, nil
 	}
 
-	// Service targeting - lookup service and discover pod
 	svc, err := t.clientset.CoreV1().Services(t.config.Namespace).Get(
 		ctx, t.config.Service, metav1.GetOptions{},
 	)
@@ -56,27 +50,26 @@ func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port in
 		return "", 0, fmt.Errorf("failed to get service: %w", err)
 	}
 
-	// Resolve service port to target port (container port)
+	// K8s services can map ports (e.g. service:80 -> container:8080),
+	// so we need to resolve to the actual container port
 	var targetPortName string
 	for _, p := range svc.Spec.Ports {
 		if int(p.Port) == t.config.Port {
 			if p.TargetPort.IntVal != 0 {
 				port = int(p.TargetPort.IntVal)
 			} else if p.TargetPort.StrVal != "" {
-				// Named port - will resolve after finding the pod
+				// named port - need the pod spec to resolve it
 				targetPortName = p.TargetPort.StrVal
 			}
 			break
 		}
 	}
 
-	// Find a ready pod using the service selector
 	targetPod, err := t.findReadyPod(ctx, svc.Spec.Selector)
 	if err != nil {
 		return "", 0, err
 	}
 
-	// Resolve named port if needed
 	if targetPortName != "" {
 		port, err = t.resolveNamedPort(targetPod, targetPortName)
 		if err != nil {
@@ -91,7 +84,6 @@ func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port in
 	return targetPod.Name, port, nil
 }
 
-// findReadyPod finds a ready pod matching the given selector labels
 func (t *Tunnel) findReadyPod(ctx context.Context, selectorLabels map[string]string) (*corev1.Pod, error) {
 	selector := metav1.FormatLabelSelector(&metav1.LabelSelector{
 		MatchLabels: selectorLabels,
@@ -122,11 +114,10 @@ func (t *Tunnel) findReadyPod(ctx context.Context, selectorLabels map[string]str
 		}
 	}
 
-	// Fallback to first running pod even if not ready
+	// not ideal but better than failing - pod might still work
 	return &pods.Items[0], nil
 }
 
-// resolveNamedPort finds the container port for a named port
 func (t *Tunnel) resolveNamedPort(pod *corev1.Pod, portName string) (int, error) {
 	for _, container := range pod.Spec.Containers {
 		for _, port := range container.Ports {
@@ -141,16 +132,13 @@ func (t *Tunnel) resolveNamedPort(pod *corev1.Pod, portName string) (int, error)
 	return 0, err
 }
 
-// createPortForwarder creates and starts the SPDY port forwarder
 func (t *Tunnel) createPortForwarder(podName string, targetPort int) (*portforward.PortForwarder, chan error, error) {
-	// Build the port-forward URL
 	req := t.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Namespace(t.config.Namespace).
 		Name(podName).
 		SubResource("portforward")
 
-	// Create the SPDY transport and dialer
 	transport, upgrader, err := spdy.RoundTripperFor(t.restConfig)
 	if err != nil {
 		t.setFailed(err)
@@ -159,14 +147,12 @@ func (t *Tunnel) createPortForwarder(podName string, targetPort int) (*portforwa
 
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, req.URL())
 
-	// Set up channels for port-forward lifecycle
 	t.stopChan = make(chan struct{})
 	t.readyChan = make(chan struct{})
 
-	// Use port 0 to get a random available local port
+	// port 0 = let the OS pick an available port
 	ports := []string{fmt.Sprintf("0:%d", targetPort)}
 
-	// Configure output writers
 	var out, errOut io.Writer = io.Discard, io.Discard
 	if t.verbose {
 		out = os.Stdout
@@ -179,7 +165,7 @@ func (t *Tunnel) createPortForwarder(podName string, targetPort int) (*portforwa
 		return nil, nil, fmt.Errorf("failed to create port forwarder: %w", err)
 	}
 
-	// Start port forwarding in a goroutine
+	// ForwardPorts blocks, so run it in background and signal errors via channel
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- fw.ForwardPorts()
@@ -188,7 +174,6 @@ func (t *Tunnel) createPortForwarder(podName string, targetPort int) (*portforwa
 	return fw, errChan, nil
 }
 
-// waitForReady waits for the port forwarder to be ready or fail
 func (t *Tunnel) waitForReady(ctx context.Context, fw *portforward.PortForwarder, errChan chan error) error {
 	select {
 	case <-t.readyChan:
@@ -213,7 +198,6 @@ func (t *Tunnel) waitForReady(ctx context.Context, fw *portforward.PortForwarder
 	}
 }
 
-// handleReady processes the successful ready state and starts error monitoring
 func (t *Tunnel) handleReady(fw *portforward.PortForwarder, errChan chan error) error {
 	forwardedPorts, err := fw.GetPorts()
 	if err != nil {
@@ -232,7 +216,6 @@ func (t *Tunnel) handleReady(fw *portforward.PortForwarder, errChan chan error) 
 	t.state = StateRunning
 	t.mu.Unlock()
 
-	// Log tunnel started
 	scheme := t.config.Scheme
 	if scheme == "" {
 		scheme = "http"
@@ -244,13 +227,12 @@ func (t *Tunnel) handleReady(fw *portforward.PortForwarder, errChan chan error) 
 	log.Printf("Tunnel started: %s://%s%s -> %s/%s:%d",
 		scheme, t.hostname, t.listenAddr, t.config.Namespace, target, t.config.Port)
 
-	// Start goroutine to monitor for errors
+	// the port-forward can die anytime (pod restart, network issues, etc)
 	go t.monitorErrors(errChan)
 
 	return nil
 }
 
-// monitorErrors watches for port-forward errors and updates tunnel state
 func (t *Tunnel) monitorErrors(errChan chan error) {
 	if err := <-errChan; err != nil {
 		log.Printf("[%s] Port forward error: %v", t.hostname, err)
@@ -258,7 +240,6 @@ func (t *Tunnel) monitorErrors(errChan chan error) {
 	}
 }
 
-// setFailed sets the tunnel state to failed with the given error
 func (t *Tunnel) setFailed(err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
