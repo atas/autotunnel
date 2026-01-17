@@ -327,7 +327,10 @@ func TestJumpHandler_buildForwardCommand(t *testing.T) {
 			}
 			handler := NewJumpHandler(route, nil, nil, nil, false)
 
-			cmd := handler.buildForwardCommand()
+			cmd, err := handler.buildForwardCommand()
+			if err != nil {
+				t.Fatalf("buildForwardCommand() error = %v", err)
+			}
 
 			// Command should contain both socat and nc fallback
 			expectedCmd := tt.wantSocat + " 2>/dev/null || " + tt.wantNc

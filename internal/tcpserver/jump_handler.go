@@ -57,7 +57,10 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 			localPort, h.route.Namespace, podName, h.route.Target.Host, h.route.Target.Port)
 	}
 
-	cmd := h.buildForwardCommand()
+	cmd, err := h.buildForwardCommand()
+	if err != nil {
+		return fmt.Errorf("failed to build forward command: %w", err)
+	}
 
 	req := h.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -203,10 +206,15 @@ func (h *JumpHandler) findReadyPod(ctx context.Context, selectorLabels map[strin
 	return &pods.Items[0], nil
 }
 
-func (h *JumpHandler) buildForwardCommand() string {
+func (h *JumpHandler) buildForwardCommand() (string, error) {
 	host := h.route.Target.Host
 	port := h.route.Target.Port
 
+	// defense-in-depth: validate host even though config validation should catch this
+	if !config.IsValidTargetHost(host) {
+		return "", fmt.Errorf("invalid target host %q: must be valid hostname or IP", host)
+	}
+
 	// try socat first (handles binary better), fall back to nc
-	return fmt.Sprintf("socat - TCP:%s:%d 2>/dev/null || nc %s %d", host, port, host, port)
+	return fmt.Sprintf("socat - TCP:%s:%d 2>/dev/null || nc %s %d", host, port, host, port), nil
 }

@@ -1166,3 +1166,91 @@ tcp:
 		t.Errorf("expected via.container 'main', got %q", postgres.Via.Container)
 	}
 }
+
+func TestIsValidTargetHost(t *testing.T) {
+	tests := []struct {
+		host  string
+		valid bool
+	}{
+		// Valid hostnames
+		{"localhost", true},
+		{"example.com", true},
+		{"sub.example.com", true},
+		{"my-host.example.com", true},
+		{"a.b.c.d.example.com", true},
+		{"host123", true},
+		{"123host", true},
+
+		// Valid IPv4
+		{"127.0.0.1", true},
+		{"10.0.0.1", true},
+		{"192.168.1.1", true},
+		{"255.255.255.255", true},
+
+		// Valid IPv6
+		{"::1", true},
+		{"2001:db8::1", true},
+		{"fe80::1", true},
+
+		// Invalid - command injection attempts
+		{"foo; rm -rf /", false},
+		{"foo$(whoami)", false},
+		{"foo`id`", false},
+		{"foo|cat /etc/passwd", false},
+		{"foo && curl evil.com", false},
+		{"foo > /tmp/pwned", false},
+		{"foo\nid", false},
+		{"foo'test", false},
+		{"foo\"test", false},
+
+		// Invalid - special characters
+		{"foo bar", false},
+		{"foo\tbar", false},
+		{"", false},
+
+		// Invalid - too long
+		{strings.Repeat("a", 254), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			got := IsValidTargetHost(tt.host)
+			if got != tt.valid {
+				t.Errorf("IsValidTargetHost(%q) = %v, want %v", tt.host, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestValidate_SocatRouteInvalidTargetHost(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Socat: map[int]SocatRouteConfig{
+					3306: {
+						Context:   "test",
+						Namespace: "default",
+						Via:       ViaConfig{Pod: "bastion"},
+						Target: TargetConfig{
+							Host: "foo; rm -rf /", // Command injection attempt
+							Port: 3306,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for invalid target host")
+	}
+	if !strings.Contains(err.Error(), "invalid characters") {
+		t.Errorf("expected error about invalid characters, got: %v", err)
+	}
+}

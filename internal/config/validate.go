@@ -2,9 +2,35 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// hostnameRegex matches valid DNS hostnames (RFC 1123)
+var hostnameRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$`)
+
+// IsValidTargetHost checks if a host string is safe for use in shell commands.
+// Allows valid hostnames (RFC 1123) and IP addresses only.
+// Prevents command injection via malicious host values in socat routes.
+func IsValidTargetHost(host string) bool {
+	if host == "" {
+		return false
+	}
+
+	// Valid IP address (v4 or v6)
+	if ip := net.ParseIP(host); ip != nil {
+		return true
+	}
+
+	// Valid hostname: max 253 chars total
+	if len(host) > 253 {
+		return false
+	}
+
+	return hostnameRegex.MatchString(host)
+}
 
 func (c *Config) Validate() error {
 	// Allow empty apiVersion (defaults to current), but reject wrong versions
@@ -149,9 +175,12 @@ func (c *Config) validateTCP() error {
 			return fmt.Errorf("%s: cannot specify both via.pod and via.service", routeID)
 		}
 
-		// Validate target host
+		// Validate target host - must be valid hostname/IP to prevent command injection
 		if route.Target.Host == "" {
 			return fmt.Errorf("%s: target.host is required", routeID)
+		}
+		if !IsValidTargetHost(route.Target.Host) {
+			return fmt.Errorf("%s: target.host %q contains invalid characters (must be valid hostname or IP)", routeID, route.Target.Host)
 		}
 
 		// Validate target port
