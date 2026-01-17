@@ -87,7 +87,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		select {
 		case s.listener.httpConns <- peekConn:
 		case <-s.done:
-			conn.Close()
+			_ = conn.Close()
 		}
 	}
 }
@@ -96,10 +96,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	close(s.done)
 	// Close listener first - unblocks Accept() calls
 	if s.listener != nil {
-		s.listener.Close()
+		_ = s.listener.Close()
 	}
 	if s.server != nil {
-		s.server.Close()
+		_ = s.server.Close()
 	}
 	return nil
 }

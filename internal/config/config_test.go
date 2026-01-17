@@ -649,14 +649,14 @@ func TestResolveKubeconfigs_EnvVarFallback(t *testing.T) {
 	originalKubeconfig := os.Getenv("KUBECONFIG")
 	defer func() {
 		if originalKubeconfig != "" {
-			os.Setenv("KUBECONFIG", originalKubeconfig)
+			_ = os.Setenv("KUBECONFIG", originalKubeconfig)
 		} else {
-			os.Unsetenv("KUBECONFIG")
+			_ = os.Unsetenv("KUBECONFIG")
 		}
 	}()
 
 	// Set KUBECONFIG env var
-	os.Setenv("KUBECONFIG", "/env/path/config1:/env/path/config2")
+	_ = os.Setenv("KUBECONFIG", "/env/path/config1:/env/path/config2")
 
 	// Create a config WITHOUT kubeconfig specified
 	tmpDir := t.TempDir()
@@ -703,14 +703,14 @@ func TestResolveKubeconfigs_DefaultFallback(t *testing.T) {
 	originalKubeconfig := os.Getenv("KUBECONFIG")
 	defer func() {
 		if originalKubeconfig != "" {
-			os.Setenv("KUBECONFIG", originalKubeconfig)
+			_ = os.Setenv("KUBECONFIG", originalKubeconfig)
 		} else {
-			os.Unsetenv("KUBECONFIG")
+			_ = os.Unsetenv("KUBECONFIG")
 		}
 	}()
 
 	// Unset KUBECONFIG
-	os.Unsetenv("KUBECONFIG")
+	_ = os.Unsetenv("KUBECONFIG")
 
 	// Create a config WITHOUT kubeconfig specified
 	tmpDir := t.TempDir()
