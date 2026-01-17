@@ -41,6 +41,7 @@ func (m *tlsMockTunnel) State() tunnel.State         { return tunnel.StateRunnin
 
 // tlsMockManager implements Manager interface for TLS tests
 type tlsMockManager struct {
+	mu         sync.Mutex
 	tunnel     tunnelmgr.TunnelHandle
 	err        error
 	getCalls   []string
@@ -48,9 +49,23 @@ type tlsMockManager struct {
 }
 
 func (m *tlsMockManager) GetOrCreateTunnel(hostname string, scheme string) (tunnelmgr.TunnelHandle, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.getCalls = append(m.getCalls, hostname)
 	m.getSchemes = append(m.getSchemes, scheme)
 	return m.tunnel, m.err
+}
+
+func (m *tlsMockManager) GetCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.getCalls...)
+}
+
+func (m *tlsMockManager) GetSchemes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.getSchemes...)
 }
 
 func TestExtractSNI_EmptyData(t *testing.T) {
@@ -184,23 +199,35 @@ func TestHandleTLSConnection_Success(t *testing.T) {
 
 	// Handle the connection
 	pc := newPeekConn(serverConn)
-	go server.handleTLSConnection(pc)
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		server.handleTLSConnection(pc)
+	}()
 
-	// Wait for completion
+	// Wait for both client and handler to complete
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Test timed out")
+		t.Fatal("Test timed out waiting for client")
+	}
+
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Test timed out waiting for handler")
 	}
 
 	// Verify manager was called with correct hostname
-	if len(mockMgr.getCalls) != 1 || mockMgr.getCalls[0] != testSNI {
-		t.Errorf("Expected GetOrCreateTunnel called with %q, got %v", testSNI, mockMgr.getCalls)
+	calls := mockMgr.GetCalls()
+	if len(calls) != 1 || calls[0] != testSNI {
+		t.Errorf("Expected GetOrCreateTunnel called with %q, got %v", testSNI, calls)
 	}
 
 	// Verify scheme was https for TLS
-	if len(mockMgr.getSchemes) > 0 && mockMgr.getSchemes[0] != "https" {
-		t.Errorf("Expected scheme 'https', got %q", mockMgr.getSchemes[0])
+	schemes := mockMgr.GetSchemes()
+	if len(schemes) > 0 && schemes[0] != "https" {
+		t.Errorf("Expected scheme 'https', got %q", schemes[0])
 	}
 }
 
