@@ -1627,13 +1627,14 @@ func TestTCPBidirectionalData(t *testing.T) {
 
 // jumpRouteConfig represents a jump-host route configuration for tests
 type jumpRouteConfig struct {
-	Context    string
-	Namespace  string
-	ViaService string // Jump pod discovered via service (mutually exclusive with ViaPod)
-	ViaPod     string // Jump pod by direct name (mutually exclusive with ViaService)
-	Container  string // Optional container name for multi-container pods
-	TargetHost string // Target host (e.g., tcp-target.autotunnel-test.svc.cluster.local)
-	TargetPort int    // Target port
+	Context     string
+	Namespace   string
+	ViaService  string // Jump pod discovered via service (mutually exclusive with ViaPod)
+	ViaPod      string // Jump pod by direct name (mutually exclusive with ViaService)
+	Container   string // Optional container name for multi-container pods
+	CreateImage string // Optional: auto-create pod with this image if it doesn't exist
+	TargetHost  string // Target host (e.g., tcp-target.autotunnel-test.svc.cluster.local)
+	TargetPort  int    // Target port
 }
 
 // writeTestConfigWithJump creates a test configuration file with HTTP, TCP, and jump routes
@@ -1719,6 +1720,10 @@ func writeTestConfigWithJump(t *testing.T, httpServices map[string]serviceConfig
 				}
 				if route.Container != "" {
 					sb.WriteString(fmt.Sprintf("          container: %s\n", route.Container))
+				}
+				if route.CreateImage != "" {
+					sb.WriteString("          create:\n")
+					sb.WriteString(fmt.Sprintf("            image: %s\n", route.CreateImage))
 				}
 				sb.WriteString("        target:\n")
 				sb.WriteString(fmt.Sprintf("          host: %s\n", route.TargetHost))
@@ -2150,4 +2155,202 @@ func TestJumpMixedWithTCPRoutes(t *testing.T) {
 			t.Errorf("Response = %q, want %q", string(response), string(testData))
 		}
 	})
+}
+
+// TestJumpAutoCreatePod tests that autotunnel creates a jump pod if it doesn't exist
+// when the via.create config is specified
+func TestJumpAutoCreatePod(t *testing.T) {
+	podName := "autotunnel-jump-test"
+	namespace := "autotunnel-test"
+
+	// Clean up any existing pod from previous test runs
+	cleanupPod := func() {
+		cmd := exec.Command("kubectl", "delete", "pod", podName,
+			"-n", namespace,
+			"--ignore-not-found=true",
+			"--wait=false")
+		_ = cmd.Run()
+		// Wait a bit for deletion to propagate
+		time.Sleep(2 * time.Second)
+	}
+
+	// Initial cleanup
+	cleanupPod()
+	t.Cleanup(cleanupPod)
+
+	// Verify pod doesn't exist before test
+	checkCmd := exec.Command("kubectl", "get", "pod", podName, "-n", namespace)
+	if err := checkCmd.Run(); err == nil {
+		t.Fatalf("Pod %s/%s should not exist before test", namespace, podName)
+	}
+
+	// Create config with auto-create enabled
+	// Using nicolaka/netshoot which has socat pre-installed
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
+		19200: {
+			Context:     getTestContext(),
+			Namespace:   namespace,
+			ViaPod:      podName,
+			CreateImage: "alpine/socat:latest",
+			TargetHost:  "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort:  3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give autotunnel time to start
+	time.Sleep(3 * time.Second)
+
+	// Connect through the jump route - this should trigger pod creation
+	conn, err := net.DialTimeout("tcp", "localhost:19200", 90*time.Second) // Extended timeout for pod creation
+	if err != nil {
+		t.Fatalf("Failed to connect to jump tunnel (pod may not have been created): %v", err)
+	}
+	defer conn.Close()
+
+	// Set generous deadline for first connection (includes pod startup time)
+	if err := conn.SetDeadline(time.Now().Add(60 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	// Test that connection works
+	testData := []byte("Auto-created jump pod test!\n")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+
+	// Verify the pod was created with correct labels
+	verifyCmd := exec.Command("kubectl", "get", "pod", podName,
+		"-n", namespace,
+		"-o", "jsonpath={.metadata.labels.app\\.kubernetes\\.io/managed-by}")
+	output, err := verifyCmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to verify pod was created: %v", err)
+	}
+
+	if string(output) != "autotunnel" {
+		t.Errorf("Pod managed-by label = %q, want 'autotunnel'", string(output))
+	}
+
+	// Verify the name label
+	nameCmd := exec.Command("kubectl", "get", "pod", podName,
+		"-n", namespace,
+		"-o", "jsonpath={.metadata.labels.app\\.kubernetes\\.io/name}")
+	nameOutput, err := nameCmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get pod name label: %v", err)
+	}
+
+	if string(nameOutput) != "autotunnel-jump" {
+		t.Errorf("Pod name label = %q, want 'autotunnel-jump'", string(nameOutput))
+	}
+
+	t.Logf("Successfully verified auto-created pod %s/%s with correct labels", namespace, podName)
+}
+
+// TestJumpAutoCreatePodAlreadyExists tests that autotunnel uses an existing pod
+// when via.create is configured but the pod already exists
+func TestJumpAutoCreatePodAlreadyExists(t *testing.T) {
+	podName := "autotunnel-jump-preexist"
+	namespace := "autotunnel-test"
+
+	// Clean up any existing pod from previous test runs
+	cleanupPod := func() {
+		cmd := exec.Command("kubectl", "delete", "pod", podName,
+			"-n", namespace,
+			"--ignore-not-found=true",
+			"--wait=false")
+		_ = cmd.Run()
+		time.Sleep(2 * time.Second)
+	}
+
+	cleanupPod()
+	t.Cleanup(cleanupPod)
+
+	// Pre-create the pod manually (simulating an existing pod)
+	createCmd := exec.Command("kubectl", "run", podName,
+		"-n", namespace,
+		"--image=alpine/socat:latest",
+		"--restart=Never",
+		"--labels=app.kubernetes.io/name=preexist-test,app.kubernetes.io/managed-by=manual",
+		"--command", "--", "sleep", "infinity")
+	if err := createCmd.Run(); err != nil {
+		t.Fatalf("Failed to pre-create pod: %v", err)
+	}
+
+	// Wait for pod to be ready
+	waitCmd := exec.Command("kubectl", "wait", "--for=condition=Ready",
+		"pod/"+podName, "-n", namespace, "--timeout=120s")
+	if err := waitCmd.Run(); err != nil {
+		t.Fatalf("Pod did not become ready: %v", err)
+	}
+
+	// Create config with auto-create enabled (even though pod exists)
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
+		19201: {
+			Context:     getTestContext(),
+			Namespace:   namespace,
+			ViaPod:      podName,
+			CreateImage: "alpine:3.19", // Different image - should NOT be used
+			TargetHost:  "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort:  3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	time.Sleep(3 * time.Second)
+
+	// Connect through the jump route
+	conn, err := net.DialTimeout("tcp", "localhost:19201", testTimeout)
+	if err != nil {
+		t.Fatalf("Failed to connect to jump tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	testData := []byte("Pre-existing pod test!\n")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+
+	// Verify the existing pod was used (labels should NOT have been changed)
+	verifyCmd := exec.Command("kubectl", "get", "pod", podName,
+		"-n", namespace,
+		"-o", "jsonpath={.metadata.labels.app\\.kubernetes\\.io/managed-by}")
+	output, err := verifyCmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to verify pod labels: %v", err)
+	}
+
+	// The original labels should still be there (not overwritten)
+	if string(output) != "manual" {
+		t.Errorf("Pod managed-by label = %q, want 'manual' (should use existing pod)", string(output))
+	}
+
+	t.Logf("Successfully verified existing pod %s/%s was used (not recreated)", namespace, podName)
 }

@@ -7,9 +7,12 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/atas/autotunnel/internal/config"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -163,6 +166,10 @@ func (h *JumpHandler) discoverJumpPod(ctx context.Context) (podName string, cont
 	containerName = h.route.Via.Container
 
 	if h.route.Via.Pod != "" {
+		// Ensure pod exists (create if configured and doesn't exist)
+		if err := h.ensureJumpPodExists(ctx); err != nil {
+			return "", "", err
+		}
 		return h.route.Via.Pod, containerName, nil
 	}
 
@@ -222,4 +229,142 @@ func (h *JumpHandler) buildForwardCommand() (string, error) {
 
 	// try socat first (handles binary better), fall back to nc
 	return fmt.Sprintf("socat - TCP:%s:%d 2>/dev/null || nc %s %d", host, port, host, port), nil
+}
+
+// ensureJumpPodExists checks if the jump pod exists, and creates it if via.create is configured
+func (h *JumpHandler) ensureJumpPodExists(ctx context.Context) error {
+	// If no create config, nothing to do
+	if h.route.Via.Create == nil {
+		return nil
+	}
+
+	podName := h.route.Via.Pod
+	namespace := h.route.Namespace
+
+	// Check if pod already exists
+	_, err := h.clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err == nil {
+		// Pod already exists
+		if h.verbose {
+			log.Printf("[jump] Pod %s/%s already exists", namespace, podName)
+		}
+		return nil
+	}
+
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to check if pod exists: %w", err)
+	}
+
+	// Pod doesn't exist, create it
+	if h.verbose {
+		log.Printf("[jump] Creating jump pod %s/%s with image %s", namespace, podName, h.route.Via.Create.Image)
+	}
+
+	pod := h.buildJumpPodSpec()
+	_, err = h.clientset.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
+	if err != nil {
+		// Check if it was created by another request in the meantime
+		if errors.IsAlreadyExists(err) {
+			if h.verbose {
+				log.Printf("[jump] Pod %s/%s was created by another request", namespace, podName)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to create jump pod: %w", err)
+	}
+
+	if h.verbose {
+		log.Printf("[jump] Waiting for pod %s/%s to be ready", namespace, podName)
+	}
+
+	// Wait for pod to be ready
+	if err := h.waitForPodReady(ctx, podName); err != nil {
+		return fmt.Errorf("jump pod not ready: %w", err)
+	}
+
+	if h.verbose {
+		log.Printf("[jump] Pod %s/%s is ready", namespace, podName)
+	}
+
+	return nil
+}
+
+// buildJumpPodSpec builds the Pod manifest for the jump pod
+func (h *JumpHandler) buildJumpPodSpec() *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      h.route.Via.Pod,
+			Namespace: h.route.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":       "autotunnel-jump",
+				"app.kubernetes.io/managed-by": "autotunnel",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:    "jump",
+					Image:   h.route.Via.Create.Image,
+					Command: []string{"sleep", "infinity"},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("10m"),
+							corev1.ResourceMemory: resource.MustParse("16Mi"),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("100m"),
+							corev1.ResourceMemory: resource.MustParse("64Mi"),
+						},
+					},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyAlways,
+		},
+	}
+}
+
+// waitForPodReady polls until the pod is ready or timeout is reached
+func (h *JumpHandler) waitForPodReady(ctx context.Context, podName string) error {
+	const (
+		pollInterval = 1 * time.Second
+		timeout      = 60 * time.Second
+	)
+
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for pod %s to be ready", podName)
+		}
+
+		pod, err := h.clientset.CoreV1().Pods(h.route.Namespace).Get(ctx, podName, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				// Pod was deleted, fail fast
+				return fmt.Errorf("pod %s was deleted", podName)
+			}
+			// Transient error, continue polling
+			if h.verbose {
+				log.Printf("[jump] Error checking pod status: %v", err)
+			}
+		} else {
+			// Check if pod is ready
+			for _, cond := range pod.Status.Conditions {
+				if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+					return nil
+				}
+			}
+
+			// Check for failure states
+			if pod.Status.Phase == corev1.PodFailed {
+				return fmt.Errorf("pod %s failed", podName)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+			// Continue polling
+		}
+	}
 }

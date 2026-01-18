@@ -11,6 +11,9 @@ import (
 // hostnameRegex matches valid DNS hostnames (RFC 1123)
 var hostnameRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$`)
 
+// imageNameRegex matches valid container image names
+var imageNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._\-/:@]*$`)
+
 // IsValidTargetHost checks if a host string is safe for use in shell commands.
 // Allows valid hostnames (RFC 1123) and IP addresses only.
 // Prevents command injection via malicious host values in socat routes.
@@ -30,6 +33,23 @@ func IsValidTargetHost(host string) bool {
 	}
 
 	return hostnameRegex.MatchString(host)
+}
+
+// IsValidImageName checks if an image name is safe for use.
+// Rejects shell metacharacters to prevent command injection.
+func IsValidImageName(image string) bool {
+	if image == "" || len(image) > 256 {
+		return false
+	}
+	// Reject shell metacharacters
+	for _, c := range image {
+		if c == ';' || c == '|' || c == '&' || c == '$' || c == '`' ||
+			c == '(' || c == ')' || c == '\'' || c == '"' || c == ' ' ||
+			c == '\n' || c == '\t' {
+			return false
+		}
+	}
+	return imageNameRegex.MatchString(image)
 }
 
 func (c *Config) Validate() error {
@@ -173,6 +193,22 @@ func (c *Config) validateTCP() error {
 		}
 		if route.Via.Pod != "" && route.Via.Service != "" {
 			return fmt.Errorf("%s: cannot specify both via.pod and via.service", routeID)
+		}
+
+		// Validate create config
+		if route.Via.Create != nil {
+			if route.Via.Service != "" {
+				return fmt.Errorf("%s: via.create cannot be used with via.service", routeID)
+			}
+			if route.Via.Pod == "" {
+				return fmt.Errorf("%s: via.pod is required when using via.create", routeID)
+			}
+			if route.Via.Create.Image == "" {
+				return fmt.Errorf("%s: via.create.image is required", routeID)
+			}
+			if !IsValidImageName(route.Via.Create.Image) {
+				return fmt.Errorf("%s: via.create.image %q is invalid", routeID, route.Via.Create.Image)
+			}
 		}
 
 		// Validate target host - must be valid hostname/IP to prevent command injection

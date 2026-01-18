@@ -65,9 +65,15 @@ func (r *JumpRouteConfig) GetMethod() string {
 }
 
 type ViaConfig struct {
-	Pod       string `yaml:"pod,omitempty"`       // Direct pod name (mutually exclusive with Service)
-	Service   string `yaml:"service,omitempty"`   // Service to discover pod from (mutually exclusive with Pod)
-	Container string `yaml:"container,omitempty"` // Container name (optional, for multi-container pods)
+	Pod       string        `yaml:"pod,omitempty"`       // Direct pod name (mutually exclusive with Service)
+	Service   string        `yaml:"service,omitempty"`   // Service to discover pod from (mutually exclusive with Pod)
+	Container string        `yaml:"container,omitempty"` // Container name (optional, for multi-container pods)
+	Create    *CreateConfig `yaml:"create,omitempty"`    // Auto-create pod if doesn't exist (requires Pod, not Service)
+}
+
+// CreateConfig defines how to auto-create a jump pod if it doesn't exist
+type CreateConfig struct {
+	Image string `yaml:"image"` // Required: container image (e.g., "alpine:3.19")
 }
 
 type TargetConfig struct {

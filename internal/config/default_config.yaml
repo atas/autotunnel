@@ -121,3 +121,15 @@ tcp:
 #          #     host: mydb.cluster-xyz.us-east-1.rds.amazonaws.com
 #          #     port: 3306
 #          #   method: socat            # Optional: "socat" is the default (uses socat/nc fallback)
+#          #
+#          # Auto-create a jump pod if it doesn't exist:
+#          # 5432:
+#          #   context: eks-prod
+#          #   namespace: default
+#          #   via:
+#          #     pod: autotunnel-jump
+#          #     create:
+#          #       image: alpine/socat:latest   # Image must have socat or nc
+#          #   target:
+#          #     host: postgres.internal
+#          #     port: 5432
