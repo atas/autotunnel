@@ -26,6 +26,9 @@ Connect to Kubernetes services and pods with friendly URLs automatically:
 * **Protocol multiplexing** - serve both HTTP and HTTPS on a single port
 * **Idle cleanup** - tunnels automatically close after configurable idle timeout
 * **Native client-go** - uses Kubernetes client library directly (no kubectl subprocess)
+* **TCP port forwarding** - forward non-HTTP protocols (databases, Redis, etc.) to K8s services/pods
+* **Jump-host routing** - reach VPC-internal services (RDS, Cloud SQL) through a jump pod
+* **Auto-create jump pods** - automatically create jump pods on-demand
 
 
 ## Installation
@@ -126,8 +129,7 @@ http:
 
    k8s:
       # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
-      # Tries to use $KUBECONFIG env var as well but that's not available in the service
-      # then defaults to ~/.kube/config
+      # Defaults to ~/.kube/config. Run `echo $KUBECONFIG` to see your value.
       # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
       # Dynamic routing: access any K8s service or pod without pre-configuring routes
@@ -143,13 +145,50 @@ http:
       routes:
          # Static routes (take priority over dynamic routing)
 
-         # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)
+         # https://argocd.localhost:8989 (also supports http, http://argocd.localhost:8989)
          argocd.localhost:
            context: my-cluster-context # Kubernetes context name from kubeconfig
            namespace: argocd           # Kubernetes namespace
            service: argocd-server      # Kubernetes service name
            port: 443                   # Service port (automatically resolves to container targetPort)
-           scheme: https               # Default is http.
+           scheme: https               # Optional. Default is http.
+                                       # You can access remote https via local http too, not the other way around.
+
+# TCP tunneling for non-HTTP protocols (databases, caches, etc.)
+# For this section, we need an available and unique local port for each mapping.
+tcp:
+   k8s:
+      routes:
+         # # PostgreSQL: connect via localhost:5432
+         # 5432: # local port
+         #   context: my-cluster-context
+         #   namespace: databases
+         #   service: postgresql
+         #   port: 5432 # remote port
+
+      # Jump routes for VPC-internal services (RDS, Cloud SQL, etc.)
+      jump:
+         # # AWS RDS via existing pod (discovered from service)
+         # 3306: # local port
+         #   context: my-cluster-context
+         #   namespace: default
+         #   via:
+         #     service: backend-api   # Use pod from this service
+         #   target:
+         #     host: mydb.rds.amazonaws.com
+         #     port: 3306
+
+         # # Redis via auto-created jump pod
+         # 6380: # local port
+         #   context: my-cluster-context
+         #   namespace: default
+         #   via:
+         #     pod: autotunnel-jump
+         #     create: # Optional, auto-create if there is no pod with socat/nc you can use
+         #       image: alpine/socat:latest
+         #   target:
+         #     host: my-redis.cache.amazonaws.com
+         #     port: 6379
 ```
 
 3. Run autotunnel:
@@ -161,11 +200,13 @@ autotunnel
 4. Access your services:
 
 ```bash
-# ArgoCD (TLS passthrough)
+# HTTP/HTTPS routes
 curl -k https://argocd.localhost:8989/
-
-# Grafana
 curl http://grafana.localhost:8989/
+
+# TCP routes (if configured)
+psql -h localhost -p 5432 -U postgres
+redis-cli -p 6379
 ```
 
 ## How It Works (k8s example)
@@ -217,7 +258,7 @@ http:
 
   k8s:
     # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
-    # Defaults to ~/.kube/config
+    # Defaults to ~/.kube/config. Run `echo $KUBECONFIG` to see your value.
     # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
     routes:
@@ -241,9 +282,69 @@ http:
         namespace: default
         pod: my-debug-pod           # Pod name (use instead of service)
         port: 8080
+
+# TCP tunneling for non-HTTP protocols (databases, caches, etc.)
+# Each route listens on a local port and forwards to a K8s service/pod
+tcp:
+  idle_timeout: 60m  # Optional, defaults to http.idle_timeout
+
+  k8s:
+    # kubeconfig: ~/.kube/config  # Optional, same format as http.k8s.kubeconfig
+
+    # Direct port-forward routes (native K8s port-forward)
+    routes:
+      # PostgreSQL: connect via localhost:5432
+      5432:
+        context: microk8s
+        namespace: databases
+        service: postgresql
+        port: 5432
+
+      # Redis: connect via localhost:6379
+      6379:
+        context: microk8s
+        namespace: caching
+        service: redis-master
+        port: 6379
+
+      # Direct pod targeting (no service discovery)
+      27017:
+        context: microk8s
+        namespace: databases
+        pod: mongodb-0
+        port: 27017
+
+    # Jump-host routes for VPC-internal services (RDS, Cloud SQL, etc.)
+    # Connects through a jump pod that has network access to the target.
+    # Requires socat or nc (netcat) installed in the jump pod.
+    jump:
+      # AWS RDS MySQL via existing jump pod
+      3306:
+        context: eks-prod
+        namespace: default
+        via:
+          service: backend-api # Discover pod from service selector
+          # pod: bastion-pod # OR use direct pod instead of service
+          # container: main  # Optional: for multi-container pods
+        target:
+          host: mydb.cluster-xyz.us-east-1.rds.amazonaws.com
+          port: 3306
+
+      # Cloud SQL via auto-created jump pod
+      5433:
+        context: gke-prod
+        namespace: default
+        via:
+          pod: autotunnel-jump      # Pod name to create & re-use
+          create:
+            image: alpine/socat:latest  # Auto-create pod with this image
+        target:
+          host: 10.0.0.5            # VPC-internal IP
+          port: 5432
+        method: socat               # Optional: "socat" (default) or "nc"
 ```
 
-### Route Options
+### HTTP Route Options
 
 Each route requires either `service` or `pod` (mutually exclusive):
 
@@ -255,6 +356,45 @@ Each route requires either `service` or `pod` (mutually exclusive):
 | `pod`       | Pod name (direct targeting, no discovery)                   |
 | `port`      | Service or pod port                                         |
 | `scheme`    | `http` (default) or `https` - sets X-Forwarded-Proto header |
+
+### TCP Route Options
+
+Direct port-forward to K8s services/pods. Each route requires either `service` or `pod`:
+
+| Field       | Description                               |
+| ----------- | ----------------------------------------- |
+| `context`   | Kubernetes context name from kubeconfig   |
+| `namespace` | Kubernetes namespace                      |
+| `service`   | Service name (discovers a ready pod)      |
+| `pod`       | Pod name (direct targeting, no discovery) |
+| `port`      | Target port on the service/pod            |
+
+Usage:
+```bash
+psql -h localhost -p 5432 -U postgres
+redis-cli -p 6379
+```
+
+### TCP Jump Route Options
+
+Connect to VPC-internal services through a jump pod. Requires `socat` or `nc` in the jump pod.
+
+| Field              | Description                                                           |
+| ------------------ | --------------------------------------------------------------------- |
+| `context`          | Kubernetes context name                                               |
+| `namespace`        | Kubernetes namespace                                                  |
+| `via.service`      | Service to discover jump pod from (mutually exclusive with `via.pod`) |
+| `via.pod`          | Direct jump pod name (mutually exclusive with `via.service`)          |
+| `via.container`    | Container name (optional, for multi-container pods)                   |
+| `via.create.image` | Image for auto-creating jump pod (requires `via.pod`)                 |
+| `target.host`      | Target hostname or IP (e.g., RDS endpoint)                            |
+| `target.port`      | Target port                                                           |
+| `method`           | `socat` (default) or `nc` - forwarding method in jump pod             |
+
+Auto-created pods have labels `app.kubernetes.io/managed-by: autotunnel`. Clean up with:
+```bash
+kubectl delete pod -l app.kubernetes.io/managed-by=autotunnel
+```
 
 ## CLI Options
 

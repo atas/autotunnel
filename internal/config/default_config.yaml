@@ -46,7 +46,9 @@ http:
          #   namespace: argocd           # Kubernetes namespace
          #   service: argocd-server      # Kubernetes service name
          #   port: 443                   # Service port (automatically resolves to container targetPort)
-         #   scheme: https               # Set X-Forwarded-Proto header (use "https" to prevent HTTPS redirects)
+         #   scheme: https               # Optional. Default is http.
+                                         # You can access remote https via local http too, not the other way around.
+
 
          # # http://grafana.localhost:8989
          # grafana.localhost:
@@ -75,28 +77,28 @@ tcp:
 #
 #       # Direct port-forward routes (native K8s port-forward)
        routes:
-#          # PostgreSQL: connect via localhost:5432
-#          # 5432:
+#          # # PostgreSQL: connect via localhost:5432
+#          # 5432: # local port
 #          #   context: my-cluster-context
 #          #   namespace: databases
 #          #   service: postgresql
 #          #   port: 5432
 #
-#          # Redis: connect via localhost:6379
-#          # 6379:
+#          # # Redis: connect via localhost:6379
+#          # 6379: # local port
 #          #   context: my-cluster-context
 #          #   namespace: caching
 #          #   service: redis-master
 #          #   port: 6379
 #
-#          # MySQL: connect via localhost:3306
-#          # 3306:
+#          # # MySQL: connect via localhost:3306
+#          # 3306: # local port
 #          #   context: my-cluster-context
 #          #   namespace: databases
 #          #   service: mysql
 #          #   port: 3306
 #
-#          # Direct pod targeting (no service discovery)
+#          # # Direct pod targeting (no service discovery)
 #          # 27017:
 #          #   context: my-cluster-context
 #          #   namespace: databases
@@ -108,8 +110,8 @@ tcp:
 #       # through a jump pod that has network access to those services.
 #       # Requires socat or nc (netcat) installed in the jump pod.
        jump:
-#          # AWS RDS MySQL: connect via localhost:3306 -> jump pod -> RDS
-#          # 3306:
+#          # # AWS RDS MySQL: connect via localhost:3306 -> jump pod -> RDS
+#          # 3306: # local port
 #          #   context: eks-prod
 #          #   namespace: default
 #          #   via:
@@ -122,8 +124,8 @@ tcp:
 #          #     port: 3306
 #          #   method: socat            # Optional: "socat" is the default (uses socat/nc fallback)
 #          #
-#          # Auto-create a jump pod if it doesn't exist:
-#          # 5432:
+#          # # Auto-create a jump pod if it doesn't exist:
+#          # 5432: # local port
 #          #   context: eks-prod
 #          #   namespace: default
 #          #   via:
