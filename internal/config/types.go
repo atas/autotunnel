@@ -24,6 +24,22 @@ type K8sRouteConfig struct {
 	Scheme    string `yaml:"scheme"` // "http" or "https" - controls X-Forwarded-Proto header (default: http)
 }
 
+// TargetName returns a display name for the target (pod or service)
+func (r K8sRouteConfig) TargetName() string {
+	if r.Pod != "" {
+		return r.Pod
+	}
+	return r.Service
+}
+
+// TargetDisplay returns a formatted target string like "pod/name:port" or "svc/name:port"
+func (r K8sRouteConfig) TargetDisplay() string {
+	if r.Pod != "" {
+		return "pod/" + r.Pod
+	}
+	return r.Service
+}
+
 type TCPConfig struct {
 	IdleTimeout time.Duration `yaml:"idle_timeout"`
 	K8s         TCPK8sConfig  `yaml:"k8s"`
@@ -43,6 +59,34 @@ type TCPRouteConfig struct {
 	Service   string `yaml:"service"` // Target service name (mutually exclusive with Pod)
 	Pod       string `yaml:"pod"`     // Target pod name directly (mutually exclusive with Service)
 	Port      int    `yaml:"port"`    // Target port on the service/pod
+}
+
+// TargetName returns a display name for the target (service preferred over pod)
+func (r TCPRouteConfig) TargetName() string {
+	if r.Service != "" {
+		return r.Service
+	}
+	return r.Pod
+}
+
+// TargetDisplay returns a formatted target string like "pod/name" or "svc/name"
+func (r TCPRouteConfig) TargetDisplay() string {
+	if r.Pod != "" {
+		return "pod/" + r.Pod
+	}
+	return r.Service
+}
+
+// ToK8sRouteConfig converts to K8sRouteConfig for shared tunnel code
+func (r TCPRouteConfig) ToK8sRouteConfig() K8sRouteConfig {
+	return K8sRouteConfig{
+		Context:   r.Context,
+		Namespace: r.Namespace,
+		Service:   r.Service,
+		Pod:       r.Pod,
+		Port:      r.Port,
+		Scheme:    "tcp",
+	}
 }
 
 
@@ -69,6 +113,14 @@ type ViaConfig struct {
 	Service   string        `yaml:"service,omitempty"`   // Service to discover pod from (mutually exclusive with Pod)
 	Container string        `yaml:"container,omitempty"` // Container name (optional, for multi-container pods)
 	Create    *CreateConfig `yaml:"create,omitempty"`    // Auto-create pod if doesn't exist (requires Pod, not Service)
+}
+
+// TargetDisplay returns a formatted target string like "pod/name" or "svc/name"
+func (v ViaConfig) TargetDisplay() string {
+	if v.Pod != "" {
+		return "pod/" + v.Pod
+	}
+	return "svc/" + v.Service
 }
 
 // CreateConfig defines how to auto-create a jump pod if it doesn't exist

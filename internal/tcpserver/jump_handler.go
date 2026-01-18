@@ -254,7 +254,11 @@ func (h *JumpHandler) ensureJumpPodExists(ctx context.Context) error {
 	}
 
 	// Wait for pod to be ready
-	if err := h.waitForPodReady(ctx, podName); err != nil {
+	timeout := 60 * time.Second // default
+	if h.route.Via.Create != nil && h.route.Via.Create.Timeout > 0 {
+		timeout = h.route.Via.Create.Timeout
+	}
+	if err := k8sutil.WaitForPodReady(ctx, h.clientset, h.route.Namespace, podName, timeout); err != nil {
 		return fmt.Errorf("jump pod not ready: %w", err)
 	}
 
@@ -324,50 +328,3 @@ func isConnectionError(msg string) bool {
 	return false
 }
 
-// waitForPodReady polls until the pod is ready or timeout is reached
-func (h *JumpHandler) waitForPodReady(ctx context.Context, podName string) error {
-	const pollInterval = 1 * time.Second
-
-	timeout := 60 * time.Second // default
-	if h.route.Via.Create != nil && h.route.Via.Create.Timeout > 0 {
-		timeout = h.route.Via.Create.Timeout
-	}
-
-	deadline := time.Now().Add(timeout)
-	for {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for pod %s to be ready", podName)
-		}
-
-		pod, err := h.clientset.CoreV1().Pods(h.route.Namespace).Get(ctx, podName, metav1.GetOptions{})
-		if err != nil {
-			if errors.IsNotFound(err) {
-				// Pod was deleted, fail fast
-				return fmt.Errorf("pod %s was deleted", podName)
-			}
-			// Transient error, continue polling
-			if h.verbose {
-				log.Printf("[jump] Error checking pod status: %v", err)
-			}
-		} else {
-			// Check if pod is ready
-			for _, cond := range pod.Status.Conditions {
-				if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-					return nil
-				}
-			}
-
-			// Check for failure states
-			if pod.Status.Phase == corev1.PodFailed {
-				return fmt.Errorf("pod %s failed", podName)
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(pollInterval):
-			// Continue polling
-		}
-	}
-}

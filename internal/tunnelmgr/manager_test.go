@@ -172,10 +172,7 @@ func TestGetOrCreateTunnel_RemovesStoppedTunnel(t *testing.T) {
 	}
 
 	// Pre-populate k8s client cache to avoid real k8s client creation
-	m.k8sClients["test"] = &k8sClient{
-		clientset:  nil, // Will be passed to factory as nil
-		restConfig: nil,
-	}
+	m.ClientFactory().InjectClient("test", nil, nil)
 
 	// Act
 	result, err := m.GetOrCreateTunnel("test.localhost", "http")
@@ -334,7 +331,7 @@ func TestGetOrCreateTunnel_DynamicRouteResolution(t *testing.T) {
 	}
 
 	// Pre-populate k8s client cache
-	m.k8sClients["microk8s"] = &k8sClient{clientset: nil, restConfig: nil}
+	m.ClientFactory().InjectClient("microk8s", nil, nil)
 
 	// Act - use dynamic hostname format
 	_, err := m.GetOrCreateTunnel("nginx-80.svc.default.ns.microk8s.cx.k8s.localhost", "http")
@@ -366,7 +363,7 @@ func TestManager_ConcurrentGetOrCreateTunnel(t *testing.T) {
 	m := NewManager(cfg)
 
 	// Pre-populate k8s client cache
-	m.k8sClients["test"] = &k8sClient{clientset: nil, restConfig: nil}
+	m.ClientFactory().InjectClient("test", nil, nil)
 
 	// Set up factory
 	m.tunnelFactory = func(hostname string, cfg config.K8sRouteConfig,

@@ -33,7 +33,7 @@ func (m *Manager) GetOrCreateTunnel(hostname string, scheme string) (TunnelHandl
 		return nil, fmt.Errorf("no route configured for hostname: %s", hostname)
 	}
 
-	clientset, restConfig, err := m.getClientsetAndConfig(m.config.HTTP.K8s.ResolvedKubeconfigs, routeConfig.Context)
+	clientset, restConfig, err := m.clientFactory.GetClientForContext(m.config.HTTP.K8s.ResolvedKubeconfigs, routeConfig.Context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s client for context %s: %w", routeConfig.Context, err)
 	}
@@ -93,13 +93,9 @@ func (m *Manager) cleanupIdleTCPTunnels() {
 	for port, tunnel := range m.tcpTunnels {
 		if tunnel.IsRunning() && tunnel.IdleDuration() > tcpIdleTimeout {
 			target := m.config.TCP.K8s.Routes[port]
-			targetName := target.Service
-			if target.Pod != "" {
-				targetName = target.Pod
-			}
 			idleDur := tunnel.IdleDuration().Round(time.Second)
 			log.Printf("Tunnel stopped: tcp://localhost:%d -> %s/%s (idle for %v)",
-				port, target.Namespace, targetName, idleDur)
+				port, target.Namespace, target.TargetName(), idleDur)
 			tunnel.Stop()
 			delete(m.tcpTunnels, port)
 		}

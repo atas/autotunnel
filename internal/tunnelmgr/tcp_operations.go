@@ -3,8 +3,6 @@ package tunnelmgr
 import (
 	"fmt"
 	"log"
-
-	"github.com/atas/autotunnel/internal/config"
 )
 
 func (m *Manager) GetOrCreateTCPTunnel(localPort int) (TunnelHandle, error) {
@@ -29,25 +27,15 @@ func (m *Manager) GetOrCreateTCPTunnel(localPort int) (TunnelHandle, error) {
 		kubeconfigs = m.config.HTTP.K8s.ResolvedKubeconfigs
 	}
 
-	clientset, restConfig, err := m.getClientsetAndConfig(kubeconfigs, routeConfig.Context)
+	clientset, restConfig, err := m.clientFactory.GetClientForContext(kubeconfigs, routeConfig.Context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s client for context %s: %w", routeConfig.Context, err)
-	}
-
-	// tunnel code is shared between HTTP and TCP, so we convert to the common type
-	k8sRoute := config.K8sRouteConfig{
-		Context:   routeConfig.Context,
-		Namespace: routeConfig.Namespace,
-		Service:   routeConfig.Service,
-		Pod:       routeConfig.Pod,
-		Port:      routeConfig.Port,
-		Scheme:    "tcp",
 	}
 
 	tunnelID := fmt.Sprintf("tcp:%d", localPort)
 	tunnel := m.tunnelFactory(
 		tunnelID,
-		k8sRoute,
+		routeConfig.ToK8sRouteConfig(),
 		clientset,
 		restConfig,
 		"", // No listen addr for tunnels - they pick a random port
@@ -58,15 +46,8 @@ func (m *Manager) GetOrCreateTCPTunnel(localPort int) (TunnelHandle, error) {
 
 	if m.config.Verbose {
 		log.Printf("[tcp] Created tunnel for port %d -> %s/%s:%d",
-			localPort, routeConfig.Namespace, tcpTarget(routeConfig), routeConfig.Port)
+			localPort, routeConfig.Namespace, routeConfig.TargetName(), routeConfig.Port)
 	}
 
 	return tunnel, nil
-}
-
-func tcpTarget(route config.TCPRouteConfig) string {
-	if route.Service != "" {
-		return route.Service
-	}
-	return route.Pod
 }

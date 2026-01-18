@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/k8sutil"
 	"github.com/atas/autotunnel/internal/tunnel"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -28,14 +29,13 @@ type Manager struct {
 
 	config *config.Config
 
-	tunnels    map[string]TunnelHandle // HTTP: hostname -> tunnel
-	tcpTunnels map[int]TunnelHandle    // TCP: local port -> tunnel
+	tunnels      map[string]TunnelHandle // HTTP: hostname -> tunnel
+	tcpTunnels   map[int]TunnelHandle    // TCP: local port -> tunnel
 	tcpTunnelsMu sync.RWMutex
 
 	tunnelFactory TunnelFactory
 
-	k8sClients   map[string]*k8sClient // one client per k8s context
-	k8sClientsMu sync.RWMutex
+	clientFactory *k8sutil.ClientFactory
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -49,7 +49,7 @@ func NewManager(cfg *config.Config) *Manager {
 		tunnels:       make(map[string]TunnelHandle),
 		tcpTunnels:    make(map[int]TunnelHandle),
 		tunnelFactory: defaultTunnelFactory,
-		k8sClients:    make(map[string]*k8sClient),
+		clientFactory: k8sutil.NewClientFactory(cfg.Verbose),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -90,9 +90,7 @@ func (m *Manager) Shutdown() {
 	m.tcpTunnels = make(map[int]TunnelHandle)
 	m.tcpTunnelsMu.Unlock()
 
-	m.k8sClientsMu.Lock()
-	m.k8sClients = make(map[string]*k8sClient)
-	m.k8sClientsMu.Unlock()
+	m.clientFactory.Clear()
 
 	m.wg.Wait()
 	log.Println("Tunnel manager stopped")
@@ -100,5 +98,10 @@ func (m *Manager) Shutdown() {
 
 // GetClientForContext is exposed so tcpserver's jump handler can reuse our k8s clients
 func (m *Manager) GetClientForContext(kubeconfigPaths []string, contextName string) (*kubernetes.Clientset, *rest.Config, error) {
-	return m.getClientsetAndConfig(kubeconfigPaths, contextName)
+	return m.clientFactory.GetClientForContext(kubeconfigPaths, contextName)
+}
+
+// ClientFactory returns the client factory (for testing)
+func (m *Manager) ClientFactory() *k8sutil.ClientFactory {
+	return m.clientFactory
 }
