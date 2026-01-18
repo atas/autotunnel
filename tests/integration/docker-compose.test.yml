@@ -74,6 +74,10 @@ services:
       - CGO_ENABLED=0
     command: >
       sh -c "
+        echo 'Installing kubectl...' &&
+        apk add --no-cache curl &&
+        curl -LO https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl &&
+        chmod +x kubectl && mv kubectl /usr/local/bin/ &&
         echo 'Building autotunnel...' &&
         go build -o autotunnel . &&
         echo 'Running integration tests...' &&
