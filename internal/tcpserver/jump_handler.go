@@ -267,25 +267,16 @@ func (h *JumpHandler) ensureJumpPodExists(ctx context.Context) error {
 	}
 
 	// Pod doesn't exist, create it
-	if h.verbose {
-		log.Printf("[jump] Creating jump pod %s/%s with image %s", namespace, podName, h.route.Via.Create.Image)
-	}
+	log.Printf("[jump] Creating jump pod %s/%s (image: %s)...", namespace, podName, h.route.Via.Create.Image)
 
 	pod := h.buildJumpPodSpec()
 	_, err = h.clientset.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		// Check if it was created by another request in the meantime
 		if errors.IsAlreadyExists(err) {
-			if h.verbose {
-				log.Printf("[jump] Pod %s/%s was created by another request", namespace, podName)
-			}
 			return nil
 		}
 		return fmt.Errorf("failed to create jump pod: %w", err)
-	}
-
-	if h.verbose {
-		log.Printf("[jump] Waiting for pod %s/%s to be ready", namespace, podName)
 	}
 
 	// Wait for pod to be ready
@@ -293,15 +284,18 @@ func (h *JumpHandler) ensureJumpPodExists(ctx context.Context) error {
 		return fmt.Errorf("jump pod not ready: %w", err)
 	}
 
-	if h.verbose {
-		log.Printf("[jump] Pod %s/%s is ready", namespace, podName)
-	}
+	log.Printf("[jump] Created jump pod %s/%s", namespace, podName)
 
 	return nil
 }
 
 // buildJumpPodSpec builds the Pod manifest for the jump pod
 func (h *JumpHandler) buildJumpPodSpec() *corev1.Pod {
+	command := h.route.Via.Create.Command
+	if len(command) == 0 {
+		command = []string{"sleep", "infinity"}
+	}
+
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      h.route.Via.Pod,
@@ -316,7 +310,7 @@ func (h *JumpHandler) buildJumpPodSpec() *corev1.Pod {
 				{
 					Name:    "jump",
 					Image:   h.route.Via.Create.Image,
-					Command: []string{"sleep", "infinity"},
+					Command: command,
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("10m"),

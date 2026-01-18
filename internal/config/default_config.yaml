@@ -131,6 +131,7 @@ tcp:
       #     pod: autotunnel-jump
       #     create:
       #       image: alpine/socat:latest   # Image must have socat or nc
+      #       # command: ["sleep", "infinity"]  # Optional: custom idle command (default: ["sleep", "infinity"])
       #   target:
       #     host: postgres.internal
       #     port: 5432

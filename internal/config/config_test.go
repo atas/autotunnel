@@ -1595,3 +1595,60 @@ tcp:
 		t.Errorf("expected via.create.image 'alpine:3.19', got %q", jump.Via.Create.Image)
 	}
 }
+
+// TestLoadConfig_WithJumpRouteCreateCommand tests loading config with custom command
+func TestLoadConfig_WithJumpRouteCreateCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	configContent := `apiVersion: autotunnel/v1
+
+http:
+  listen: ":8989"
+  idle_timeout: 30m
+
+tcp:
+  k8s:
+    jump:
+      5432:
+        context: eks-prod
+        namespace: default
+        via:
+          pod: autotunnel-jump
+          create:
+            image: alpine:3.19
+            command: ["tail", "-f", "/dev/null"]
+        target:
+          host: postgres.internal
+          port: 5432
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Verify jump route with create and command was loaded
+	jump, ok := cfg.TCP.K8s.Jump[5432]
+	if !ok {
+		t.Fatal("expected jump route for port 5432")
+	}
+	if jump.Via.Create == nil {
+		t.Fatal("expected via.create to be set")
+	}
+	if jump.Via.Create.Image != "alpine:3.19" {
+		t.Errorf("expected via.create.image 'alpine:3.19', got %q", jump.Via.Create.Image)
+	}
+	expectedCommand := []string{"tail", "-f", "/dev/null"}
+	if len(jump.Via.Create.Command) != len(expectedCommand) {
+		t.Fatalf("expected command length %d, got %d", len(expectedCommand), len(jump.Via.Create.Command))
+	}
+	for i, cmd := range expectedCommand {
+		if jump.Via.Create.Command[i] != cmd {
+			t.Errorf("expected command[%d] %q, got %q", i, cmd, jump.Via.Create.Command[i])
+		}
+	}
+}

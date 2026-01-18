@@ -779,6 +779,39 @@ func TestJumpHandler_buildJumpPodSpec(t *testing.T) {
 	}
 }
 
+func TestJumpHandler_buildJumpPodSpec_CustomCommand(t *testing.T) {
+	customCommand := []string{"tail", "-f", "/dev/null"}
+	route := config.JumpRouteConfig{
+		Context:   "test-context",
+		Namespace: "test-ns",
+		Via: config.ViaConfig{
+			Pod: "autotunnel-jump",
+			Create: &config.CreateConfig{
+				Image:   "alpine:3.19",
+				Command: customCommand,
+			},
+		},
+		Target: config.TargetConfig{
+			Host: "database.internal",
+			Port: 5432,
+		},
+	}
+
+	handler := NewJumpHandler(route, nil, nil, nil, false)
+	pod := handler.buildJumpPodSpec()
+
+	// Verify custom command is used
+	container := pod.Spec.Containers[0]
+	if len(container.Command) != len(customCommand) {
+		t.Fatalf("expected command length %d, got %d", len(customCommand), len(container.Command))
+	}
+	for i, cmd := range customCommand {
+		if container.Command[i] != cmd {
+			t.Errorf("expected command[%d]=%q, got %q", i, cmd, container.Command[i])
+		}
+	}
+}
+
 func TestJumpHandler_waitForPodReady_Timeout(t *testing.T) {
 	// Create a pod that never becomes ready
 	pod := &corev1.Pod{
