@@ -90,11 +90,24 @@ func (s *Server) startListener(port int, lt listenerType) error {
 	s.wg.Add(1)
 	go s.acceptLoop(pl)
 
-	typeStr := "route"
+	var destStr string
 	if lt == listenerTypeJump {
-		typeStr = "jump"
+		jumpCfg := s.config.TCP.K8s.Jump[port]
+		destStr = fmt.Sprintf("-> %s:%d via %s/%s (jump)",
+			jumpCfg.Target.Host, jumpCfg.Target.Port, jumpCfg.Namespace, jumpCfg.Via.Pod)
+		if jumpCfg.Via.Service != "" {
+			destStr = fmt.Sprintf("-> %s:%d via %s/svc/%s (jump)",
+				jumpCfg.Target.Host, jumpCfg.Target.Port, jumpCfg.Namespace, jumpCfg.Via.Service)
+		}
+	} else {
+		routeCfg := s.config.TCP.K8s.Routes[port]
+		if routeCfg.Service != "" {
+			destStr = fmt.Sprintf("-> %s/svc/%s:%d", routeCfg.Namespace, routeCfg.Service, routeCfg.Port)
+		} else {
+			destStr = fmt.Sprintf("-> %s/%s:%d", routeCfg.Namespace, routeCfg.Pod, routeCfg.Port)
+		}
 	}
-	log.Printf("TCP listener started on %s (%s)", addr, typeStr)
+	log.Printf("TCP listener started on %s %s", addr, destStr)
 	return nil
 }
 

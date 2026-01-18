@@ -112,8 +112,6 @@ func main() {
 			}
 		}
 
-		fmt.Printf("Listening on %s\n", app.cfg.HTTP.ListenAddr)
-
 		// Wait for signal or config reload
 		shouldExit := false
 		select {
