@@ -220,6 +220,8 @@ func writeTestConfigWithTCP(t *testing.T, httpServices map[string]serviceConfig,
 
 // TestBasicProxyConnection tests that requests are proxied through a tunnel
 func TestBasicProxyConnection(t *testing.T) {
+	t.Log("Testing HTTP proxy to nginx and echo services; expecting 200 OK with service-specific content")
+
 	// Create test config pointing to our test services
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
@@ -300,6 +302,8 @@ func TestBasicProxyConnection(t *testing.T) {
 
 // TestUnknownHostReturns502 tests that unknown hosts return 502
 func TestUnknownHostReturns502(t *testing.T) {
+	t.Log("Requesting unknown host; expecting 502 Bad Gateway")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
@@ -330,6 +334,8 @@ func TestUnknownHostReturns502(t *testing.T) {
 
 // TestMultipleRequestsReusesTunnel tests that multiple requests reuse the same tunnel
 func TestMultipleRequestsReusesTunnel(t *testing.T) {
+	t.Log("Sending 5 sequential requests to nginx.test; verifying tunnel reuse with all 200 OK")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
@@ -363,6 +369,8 @@ func TestMultipleRequestsReusesTunnel(t *testing.T) {
 
 // TestGracefulShutdown tests that the server shuts down gracefully
 func TestGracefulShutdown(t *testing.T) {
+	t.Log("Testing graceful shutdown after SIGINT with active nginx tunnel")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
@@ -414,6 +422,8 @@ func TestGracefulShutdown(t *testing.T) {
 
 // TestDirectPodTargeting tests routing directly to a pod without going through a Service
 func TestDirectPodTargeting(t *testing.T) {
+	t.Log("Routing to standalone-pod directly (no Service); expecting 200 OK with 'direct-pod-test'")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"standalone.test": {
 			Context:   getTestContext(),
@@ -452,6 +462,8 @@ func TestDirectPodTargeting(t *testing.T) {
 
 // TestXForwardedHeaders tests that X-Forwarded-* headers are set correctly
 func TestXForwardedHeaders(t *testing.T) {
+	t.Log("Verifying X-Forwarded-Proto/Host/For headers via echo-headers service")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"headers.test": {
 			Context:   getTestContext(),
@@ -524,6 +536,8 @@ func TestXForwardedHeaders(t *testing.T) {
 
 // TestConcurrentRequestsSameHost tests that concurrent requests to the same host work correctly
 func TestConcurrentRequestsSameHost(t *testing.T) {
+	t.Log("Sending 50 concurrent requests to nginx.test; expecting all 200 OK")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
@@ -585,6 +599,8 @@ func TestConcurrentRequestsSameHost(t *testing.T) {
 
 // TestHostHeaderWithPort tests that Host headers with port numbers are handled correctly
 func TestHostHeaderWithPort(t *testing.T) {
+	t.Log("Testing Host header with port (nginx.test:18989); expecting correct routing")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
@@ -628,6 +644,8 @@ func TestHostHeaderWithPort(t *testing.T) {
 
 // TestTLSPassthrough tests TLS passthrough functionality
 func TestTLSPassthrough(t *testing.T) {
+	t.Log("Testing TLS passthrough to nginx-tls service; expecting successful HTTPS handshake")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx-tls.test": {
 			Context:   getTestContext(),
@@ -694,6 +712,8 @@ func TestTLSPassthrough(t *testing.T) {
 
 // TestTLSPassthroughCertFromBackend verifies the cert comes from the backend (passthrough)
 func TestTLSPassthroughCertFromBackend(t *testing.T) {
+	t.Log("Verifying TLS cert comes from nginx-tls backend (CN=nginx-tls.test)")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx-tls.test": {
 			Context:   getTestContext(),
@@ -733,6 +753,8 @@ func TestTLSPassthroughCertFromBackend(t *testing.T) {
 
 // TestNamedPortResolution tests that named ports are resolved correctly
 func TestNamedPortResolution(t *testing.T) {
+	t.Log("Testing named port resolution via echo-named-ports service")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"named-port.test": {
 			Context:   getTestContext(),
@@ -771,6 +793,8 @@ func TestNamedPortResolution(t *testing.T) {
 
 // TestIdleTimeoutCleanup tests that tunnels are cleaned up after idle timeout
 func TestIdleTimeoutCleanup(t *testing.T) {
+	t.Log("Testing tunnel cleanup after 3s idle timeout on port 18990")
+
 	// Use a custom config with very short idle timeout
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
@@ -859,6 +883,8 @@ http:
 
 // TestMultiPortServiceRouting tests routing to different ports on the same service
 func TestMultiPortServiceRouting(t *testing.T) {
+	t.Log("Routing to multi-port service on ports 8080/8081/8082; verifying port-specific responses")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"api.test": {
 			Context:   getTestContext(),
@@ -922,6 +948,8 @@ func TestMultiPortServiceRouting(t *testing.T) {
 
 // TestConcurrentRequestsDifferentHosts tests concurrent requests to different hosts
 func TestConcurrentRequestsDifferentHosts(t *testing.T) {
+	t.Log("Sending 10 concurrent requests each to nginx.test, echo.test, api.test")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
@@ -999,6 +1027,8 @@ func TestConcurrentRequestsDifferentHosts(t *testing.T) {
 
 // TestServiceNotFound tests error handling when service doesn't exist
 func TestServiceNotFound(t *testing.T) {
+	t.Log("Requesting nonexistent-service; expecting 502 Bad Gateway")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nonexistent.test": {
 			Context:   getTestContext(),
@@ -1034,6 +1064,8 @@ func TestServiceNotFound(t *testing.T) {
 
 // TestWebSocketConnection tests WebSocket upgrade through the proxy
 func TestWebSocketConnection(t *testing.T) {
+	t.Log("Testing WebSocket upgrade through proxy to websocket-echo service")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"ws.test": {
 			Context:   getTestContext(),
@@ -1100,6 +1132,8 @@ func TestWebSocketConnection(t *testing.T) {
 
 // TestHostHeaderCaseSensitivity tests case-insensitive host matching
 func TestHostHeaderCaseSensitivity(t *testing.T) {
+	t.Log("Testing case variations of nginx.test (NGINX.TEST, Nginx.Test)")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
@@ -1137,6 +1171,8 @@ func TestHostHeaderCaseSensitivity(t *testing.T) {
 
 // TestEmptyHostHeader tests handling of empty or missing Host header
 func TestEmptyHostHeader(t *testing.T) {
+	t.Log("Sending request without Host header; expecting error response")
+
 	configPath := writeTestConfig(t, map[string]serviceConfig{
 		"nginx.test": {
 			Context:   getTestContext(),
@@ -1182,6 +1218,8 @@ func TestEmptyHostHeader(t *testing.T) {
 
 // TestIdleTimeoutReset tests that activity resets the idle timeout
 func TestIdleTimeoutReset(t *testing.T) {
+	t.Log("Verifying idle timeout resets with activity (5s timeout, requests every 2s)")
+
 	// Use a custom config with short idle timeout
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
@@ -1261,6 +1299,8 @@ http:
 
 // TestTCPBasicConnection tests basic TCP echo through tunnel
 func TestTCPBasicConnection(t *testing.T) {
+	t.Log("Testing TCP echo through tunnel on port 19000 to tcp-echo service")
+
 	configPath := writeTestConfigWithTCP(t,
 		map[string]serviceConfig{
 			"nginx.test": {
@@ -1310,6 +1350,8 @@ func TestTCPBasicConnection(t *testing.T) {
 
 // TestTCPMultipleConnectionsReuseTunnel tests that multiple sequential connections reuse the same tunnel
 func TestTCPMultipleConnectionsReuseTunnel(t *testing.T) {
+	t.Log("Sending 5 sequential TCP connections; verifying tunnel reuse")
+
 	configPath := writeTestConfigWithTCP(t,
 		map[string]serviceConfig{
 			"nginx.test": {
@@ -1366,6 +1408,8 @@ func TestTCPMultipleConnectionsReuseTunnel(t *testing.T) {
 
 // TestTCPConcurrentConnections tests multiple concurrent TCP connections
 func TestTCPConcurrentConnections(t *testing.T) {
+	t.Log("Sending 20 concurrent TCP connections to tcp-echo service")
+
 	configPath := writeTestConfigWithTCP(t,
 		map[string]serviceConfig{
 			"nginx.test": {
@@ -1446,6 +1490,8 @@ func TestTCPConcurrentConnections(t *testing.T) {
 
 // TestTCPDirectPodTargeting tests TCP routing directly to a pod (no service)
 func TestTCPDirectPodTargeting(t *testing.T) {
+	t.Log("TCP routing directly to tcp-echo-standalone pod on port 19003")
+
 	configPath := writeTestConfigWithTCP(t,
 		map[string]serviceConfig{
 			"nginx.test": {
@@ -1495,6 +1541,8 @@ func TestTCPDirectPodTargeting(t *testing.T) {
 
 // TestTCPMultipleRoutes tests multiple TCP routes on different ports
 func TestTCPMultipleRoutes(t *testing.T) {
+	t.Log("Testing two TCP routes: tcp-echo (19004) and tcp-echo-alt (19005)")
+
 	configPath := writeTestConfigWithTCP(t,
 		map[string]serviceConfig{
 			"nginx.test": {
@@ -1563,6 +1611,8 @@ func TestTCPMultipleRoutes(t *testing.T) {
 
 // TestTCPBidirectionalData tests bidirectional data transfer with various sizes
 func TestTCPBidirectionalData(t *testing.T) {
+	t.Log("Testing TCP bidirectional transfer with 100/1000/10000 byte payloads")
+
 	configPath := writeTestConfigWithTCP(t,
 		map[string]serviceConfig{
 			"nginx.test": {
@@ -1629,13 +1679,14 @@ func TestTCPBidirectionalData(t *testing.T) {
 type jumpRouteConfig struct {
 	Context       string
 	Namespace     string
-	ViaService    string   // Jump pod discovered via service (mutually exclusive with ViaPod)
-	ViaPod        string   // Jump pod by direct name (mutually exclusive with ViaService)
-	Container     string   // Optional container name for multi-container pods
-	CreateImage   string   // Optional: auto-create pod with this image if it doesn't exist
-	CreateCommand []string // Optional: custom command for auto-created pod (default: ["sleep", "infinity"])
-	TargetHost    string   // Target host (e.g., tcp-target.autotunnel-test.svc.cluster.local)
-	TargetPort    int      // Target port
+	ViaService    string        // Jump pod discovered via service (mutually exclusive with ViaPod)
+	ViaPod        string        // Jump pod by direct name (mutually exclusive with ViaService)
+	Container     string        // Optional container name for multi-container pods
+	CreateImage   string        // Optional: auto-create pod with this image if it doesn't exist
+	CreateCommand []string      // Optional: custom command for auto-created pod (default: ["sleep", "infinity"])
+	CreateTimeout time.Duration // Optional: timeout for pod readiness (default: 60s)
+	TargetHost    string        // Target host (e.g., tcp-target.autotunnel-test.svc.cluster.local)
+	TargetPort    int           // Target port
 }
 
 // writeTestConfigWithJump creates a test configuration file with HTTP, TCP, and jump routes
@@ -1731,6 +1782,9 @@ func writeTestConfigWithJump(t *testing.T, httpServices map[string]serviceConfig
 							sb.WriteString(fmt.Sprintf("              - %q\n", cmd))
 						}
 					}
+					if route.CreateTimeout > 0 {
+						sb.WriteString(fmt.Sprintf("            timeout: %s\n", route.CreateTimeout))
+					}
 				}
 				sb.WriteString("        target:\n")
 				sb.WriteString(fmt.Sprintf("          host: %s\n", route.TargetHost))
@@ -1759,6 +1813,8 @@ func writeTestConfigWithJump(t *testing.T, httpServices map[string]serviceConfig
 
 // TestJumpBasicConnection tests basic connectivity through a jump pod via service
 func TestJumpBasicConnection(t *testing.T) {
+	t.Log("Testing jump connection via bastion-jump service to tcp-target")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19100: {
 			Context:    getTestContext(),
@@ -1802,6 +1858,8 @@ func TestJumpBasicConnection(t *testing.T) {
 
 // TestJumpViaPod tests jump-host routing using direct pod targeting
 func TestJumpViaPod(t *testing.T) {
+	t.Log("Testing jump connection via bastion-standalone pod directly")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19101: {
 			Context:    getTestContext(),
@@ -1845,6 +1903,8 @@ func TestJumpViaPod(t *testing.T) {
 
 // TestJumpBidirectionalData tests bidirectional data transfer with various sizes through jump host
 func TestJumpBidirectionalData(t *testing.T) {
+	t.Log("Testing bidirectional data (100/1000/5000 bytes) through jump host")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19102: {
 			Context:    getTestContext(),
@@ -1899,6 +1959,8 @@ func TestJumpBidirectionalData(t *testing.T) {
 
 // TestJumpMultipleConnections tests multiple sequential connections through jump host
 func TestJumpMultipleConnections(t *testing.T) {
+	t.Log("Sending 5 sequential connections through bastion-jump")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19103: {
 			Context:    getTestContext(),
@@ -1946,6 +2008,8 @@ func TestJumpMultipleConnections(t *testing.T) {
 
 // TestJumpMultipleRoutes tests multiple jump routes on different ports
 func TestJumpMultipleRoutes(t *testing.T) {
+	t.Log("Testing two jump routes: via service (19104) and via pod (19105)")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19104: {
 			Context:    getTestContext(),
@@ -2009,6 +2073,8 @@ func TestJumpMultipleRoutes(t *testing.T) {
 
 // TestJumpConcurrentConnections tests multiple concurrent connections through jump host
 func TestJumpConcurrentConnections(t *testing.T) {
+	t.Log("Sending 10 concurrent connections through bastion-jump")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19106: {
 			Context:    getTestContext(),
@@ -2083,6 +2149,8 @@ func TestJumpConcurrentConnections(t *testing.T) {
 
 // TestJumpMixedWithTCPRoutes tests that jump routes work alongside direct TCP routes
 func TestJumpMixedWithTCPRoutes(t *testing.T) {
+	t.Log("Testing direct TCP (19107) and jump (19108) routes together")
+
 	configPath := writeTestConfigWithJump(t, nil,
 		map[int]tcpRouteConfig{
 			19107: {
@@ -2167,6 +2235,8 @@ func TestJumpMixedWithTCPRoutes(t *testing.T) {
 // TestJumpAutoCreatePod tests that autotunnel creates a jump pod if it doesn't exist
 // when the via.create config is specified
 func TestJumpAutoCreatePod(t *testing.T) {
+	t.Log("Testing auto-creation of jump pod (autotunnel-jump-test) with alpine/socat")
+
 	podName := "autotunnel-jump-test"
 	namespace := "autotunnel-test"
 
@@ -2269,6 +2339,8 @@ func TestJumpAutoCreatePod(t *testing.T) {
 // TestJumpAutoCreatePodAlreadyExists tests that autotunnel uses an existing pod
 // when via.create is configured but the pod already exists
 func TestJumpAutoCreatePodAlreadyExists(t *testing.T) {
+	t.Log("Verifying existing pod is reused when auto-create is configured")
+
 	podName := "autotunnel-jump-preexist"
 	namespace := "autotunnel-test"
 
@@ -2364,6 +2436,8 @@ func TestJumpAutoCreatePodAlreadyExists(t *testing.T) {
 
 // TestJumpMultiContainerPod tests selecting a specific container in a multi-container pod
 func TestJumpMultiContainerPod(t *testing.T) {
+	t.Log("Testing container selection in multi-container-bastion (socat container)")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19300: {
 			Context:    getTestContext(),
@@ -2410,6 +2484,8 @@ func TestJumpMultiContainerPod(t *testing.T) {
 
 // TestJumpAutoCreatePodCustomCommand tests auto-creating a jump pod with a custom command
 func TestJumpAutoCreatePodCustomCommand(t *testing.T) {
+	t.Log("Testing auto-create with custom command (tail -f /dev/null)")
+
 	podName := "autotunnel-custom-cmd"
 	namespace := "autotunnel-test"
 
@@ -2497,6 +2573,8 @@ func TestJumpAutoCreatePodCustomCommand(t *testing.T) {
 // TestJumpNetcatFallback tests that nc fallback works when socat is not available
 // Uses busybox which has nc but not socat
 func TestJumpNetcatFallback(t *testing.T) {
+	t.Log("Testing nc fallback via nc-only-bastion (busybox without socat)")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19302: {
 			Context:    getTestContext(),
@@ -2542,6 +2620,8 @@ func TestJumpNetcatFallback(t *testing.T) {
 
 // TestJumpTargetUnreachable tests graceful error handling when target is unreachable
 func TestJumpTargetUnreachable(t *testing.T) {
+	t.Log("Testing error handling when jump target DNS fails")
+
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19303: {
 			Context:    getTestContext(),
@@ -2592,14 +2672,17 @@ func TestJumpTargetUnreachable(t *testing.T) {
 }
 
 // TestJumpPodReadyTimeout tests error handling when auto-created pod never becomes ready
-// Uses an invalid image to ensure pod creation fails
+// Uses an invalid image to ensure pod creation fails, with a short timeout to keep CI fast
 func TestJumpPodReadyTimeout(t *testing.T) {
+	t.Log("Testing timeout when auto-created pod uses invalid image")
+
 	if testing.Short() {
-		t.Skip("Skipping pod timeout test in short mode (takes ~60+ seconds)")
+		t.Skip("Skipping pod timeout test in short mode")
 	}
 
 	podName := "autotunnel-timeout-test"
 	namespace := "autotunnel-test"
+	podReadyTimeout := 10 * time.Second // Short timeout for CI
 
 	// Clean up any existing pod from previous test runs
 	cleanupPod := func() {
@@ -2624,12 +2707,13 @@ func TestJumpPodReadyTimeout(t *testing.T) {
 	// Create config with auto-create but invalid image that will never start
 	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19304: {
-			Context:     getTestContext(),
-			Namespace:   namespace,
-			ViaPod:      podName,
-			CreateImage: "invalid-registry.example.com/nonexistent:v999", // Image that won't exist
-			TargetHost:  "tcp-target.autotunnel-test.svc.cluster.local",
-			TargetPort:  3306,
+			Context:       getTestContext(),
+			Namespace:     namespace,
+			ViaPod:        podName,
+			CreateImage:   "invalid-registry.example.com/nonexistent:v999", // Image that won't exist
+			CreateTimeout: podReadyTimeout,
+			TargetHost:    "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort:    3306,
 		},
 	})
 
@@ -2641,9 +2725,8 @@ func TestJumpPodReadyTimeout(t *testing.T) {
 
 	// TCP connection will be accepted by the listener, but the actual jump
 	// connection should fail when trying to use it (after pod ready timeout).
-	// We use a longer timeout to allow for the ~60s pod ready timeout.
 	startTime := time.Now()
-	conn, err := net.DialTimeout("tcp", "localhost:19304", 90*time.Second)
+	conn, err := net.DialTimeout("tcp", "localhost:19304", 30*time.Second)
 	if err != nil {
 		// Connection may be rejected immediately - that's acceptable error handling
 		elapsed := time.Since(startTime)
@@ -2652,8 +2735,8 @@ func TestJumpPodReadyTimeout(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Set a deadline that accounts for the pod ready timeout (~60s) plus some buffer
-	if err := conn.SetDeadline(time.Now().Add(90 * time.Second)); err != nil {
+	// Set a deadline that accounts for the pod ready timeout plus some buffer
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
 		t.Fatalf("Failed to set deadline: %v", err)
 	}
 
@@ -2675,11 +2758,6 @@ func TestJumpPodReadyTimeout(t *testing.T) {
 	if err != nil {
 		// Expected: read failure due to pod creation timeout
 		t.Logf("Read failed as expected after %v: %v", elapsed, err)
-
-		// Verify the failure took approximately the expected time (~60s for pod ready timeout)
-		if elapsed < 30*time.Second {
-			t.Logf("Note: Connection failed faster than expected pod ready timeout (this is acceptable)")
-		}
 	} else {
 		t.Errorf("Unexpectedly received data from unreachable pod: %q", string(response))
 	}
@@ -2689,6 +2767,8 @@ func TestJumpPodReadyTimeout(t *testing.T) {
 
 // TestConfigHotReload tests that config file changes are automatically detected and applied
 func TestConfigHotReload(t *testing.T) {
+	t.Log("Testing config hot-reload: adding nginx2.localhost route dynamically")
+
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
 		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")

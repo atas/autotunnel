@@ -15,20 +15,20 @@ A lightweight, auto and on-demand (lazy) port-forwarding proxy to Kubernetes. Tu
 
 Connect to Kubernetes services and pods with friendly URLs automatically:
 
-* `https://argocd.localhost:8989` — Pre-configured route
 * `http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989` — Dynamic routing (no config needed)
+* `https://argocd.localhost:8989` — Pre-configured route
 
 ### Features
 
 * **On-demand tunneling** - port-forwards are created automatically when traffic arrives
 * **HTTP and HTTPS support** - HTTP reverse proxy with `X-Forwarded-*` headers, TLS passthrough for HTTPS
+* 💥 **TCP port forwarding** 🆕 - on-demand forward non-HTTP protocols (databases, Redis, etc.) to K8s services/pods
+* 💥 **Jump-host routing** 🆕 - reach VPC-internal services on-demand (RDS, Cloud SQL) through a jump pod
+* **Auto-create jump pods** 🆕 - automatically create jump pods on-demand
 * **K8s Services and Pods** - target either directly or let it discover pods via service selectors
 * **Protocol multiplexing** - serve both HTTP and HTTPS on a single port
 * **Idle cleanup** - tunnels automatically close after configurable idle timeout
 * **Native client-go** - uses Kubernetes client library directly (no kubectl subprocess)
-* **TCP port forwarding** - forward non-HTTP protocols (databases, Redis, etc.) to K8s services/pods
-* **Jump-host routing** - reach VPC-internal services (RDS, Cloud SQL) through a jump pod
-* **Auto-create jump pods** - automatically create jump pods on-demand
 
 
 ## Installation
@@ -385,17 +385,17 @@ redis-cli -p 6379
 
 Connect to VPC-internal services through a jump pod. Requires `socat` or `nc` in the jump pod.
 
-| Field              | Description                                                           |
-| ------------------ | --------------------------------------------------------------------- |
-| `context`          | Kubernetes context name                                               |
-| `namespace`        | Kubernetes namespace                                                  |
-| `via.service`      | Service to discover jump pod from (mutually exclusive with `via.pod`) |
-| `via.pod`          | Direct jump pod name (mutually exclusive with `via.service`)          |
-| `via.container`    | Container name (optional, for multi-container pods)                   |
-| `via.create.image`   | Image for auto-creating jump pod (requires `via.pod`)                 |
-| `via.create.timeout` | Pod readiness timeout (default: 60s)                                  |
-| `target.host`        | Target hostname or IP (e.g., RDS endpoint)                            |
-| `target.port`        | Target port                                                           |
+| Field                | Description                                                             |
+| -------------------- | ----------------------------------------------------------------------- |
+| `context`            | Kubernetes context name                                                 |
+| `namespace`          | Kubernetes namespace                                                    |
+| `via.service`        | Service to discover jump pod from (mutually exclusive with `via.pod`)   |
+| `via.pod`            | Direct jump pod name (mutually exclusive with `via.service`)            |
+| `via.container`      | Container name (optional, for multi-container pods)                     |
+| `via.create.image`   | Image for auto-creating jump pod (requires `via.pod`)                   |
+| `via.create.timeout` | Pod readiness timeout (default: 60s)                                    |
+| `target.host`        | Target hostname or IP (e.g., RDS endpoint)                              |
+| `target.port`        | Target port                                                             |
 | `method`             | `socat` (default) - forwarding method in jump pod (nc is auto-fallback) |
 
 Auto-created pods have labels `app.kubernetes.io/managed-by: autotunnel`. Clean up with:

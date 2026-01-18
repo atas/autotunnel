@@ -77,10 +77,41 @@ func (t *Tunnel) Start(ctx context.Context) error {
 		t.mu.Unlock()
 		return nil
 	}
+	if t.state == StateStarting {
+		t.mu.Unlock()
+		return t.awaitReady(ctx) // Wait for first caller to complete
+	}
 	t.state = StateStarting
 	t.mu.Unlock()
-
 	return t.startPortForward(ctx)
+}
+
+// awaitReady waits for a concurrent Start() to complete
+func (t *Tunnel) awaitReady(ctx context.Context) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			t.mu.RLock()
+			state := t.state
+			lastErr := t.lastError
+			t.mu.RUnlock()
+
+			switch state {
+			case StateRunning:
+				return nil // Success
+			case StateFailed:
+				return lastErr
+			case StateIdle:
+				return t.Start(ctx) // First caller failed, retry
+				// StateStarting: keep waiting
+			}
+		}
+	}
 }
 
 func (t *Tunnel) Stop() {

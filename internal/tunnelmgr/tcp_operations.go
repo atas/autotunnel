@@ -3,17 +3,22 @@ package tunnelmgr
 import (
 	"fmt"
 	"log"
+
+	"github.com/atas/autotunnel/internal/tunnel"
 )
 
 func (m *Manager) GetOrCreateTCPTunnel(localPort int) (TunnelHandle, error) {
 	m.tcpTunnelsMu.Lock()
 	defer m.tcpTunnelsMu.Unlock()
 
-	if tunnel, ok := m.tcpTunnels[localPort]; ok {
-		if tunnel.IsRunning() {
-			tunnel.Touch()
-			return tunnel, nil
+	if tun, ok := m.tcpTunnels[localPort]; ok {
+		state := tun.State()
+		// Preserve tunnels that are idle, starting, or running
+		if state != tunnel.StateStopping && state != tunnel.StateFailed {
+			tun.Touch()
+			return tun, nil
 		}
+		// Only delete stopped/failed tunnels
 		delete(m.tcpTunnels, localPort)
 	}
 
@@ -33,7 +38,7 @@ func (m *Manager) GetOrCreateTCPTunnel(localPort int) (TunnelHandle, error) {
 	}
 
 	tunnelID := fmt.Sprintf("tcp:%d", localPort)
-	tunnel := m.tunnelFactory(
+	newTunnel := m.tunnelFactory(
 		tunnelID,
 		routeConfig.ToK8sRouteConfig(),
 		clientset,
@@ -42,12 +47,12 @@ func (m *Manager) GetOrCreateTCPTunnel(localPort int) (TunnelHandle, error) {
 		m.config.Verbose,
 	)
 
-	m.tcpTunnels[localPort] = tunnel
+	m.tcpTunnels[localPort] = newTunnel
 
 	if m.config.Verbose {
 		log.Printf("[tcp] Created tunnel for port %d -> %s/%s:%d",
 			localPort, routeConfig.Namespace, routeConfig.TargetName(), routeConfig.Port)
 	}
 
-	return tunnel, nil
+	return newTunnel, nil
 }

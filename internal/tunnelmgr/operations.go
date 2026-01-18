@@ -4,18 +4,22 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/atas/autotunnel/internal/tunnel"
 )
 
 func (m *Manager) GetOrCreateTunnel(hostname string, scheme string) (TunnelHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if tunnel, ok := m.tunnels[hostname]; ok {
-		if tunnel.IsRunning() {
-			tunnel.Touch()
-			return tunnel, nil
+	if tun, ok := m.tunnels[hostname]; ok {
+		state := tun.State()
+		// Preserve tunnels that are idle, starting, or running
+		if state != tunnel.StateStopping && state != tunnel.StateFailed {
+			tun.Touch()
+			return tun, nil
 		}
-		// dead tunnel, clean it up
+		// Only delete stopped/failed tunnels
 		delete(m.tunnels, hostname)
 	}
 
