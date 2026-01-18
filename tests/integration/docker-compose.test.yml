@@ -42,6 +42,12 @@ services:
         kubectl --kubeconfig=/output/kubeconfig wait --for=condition=ready pod -l app=nginx -n autotunnel-test --timeout=180s
         echo "Waiting for echo pod..."
         kubectl --kubeconfig=/output/kubeconfig wait --for=condition=ready pod -l app=echo -n autotunnel-test --timeout=180s
+        echo "Waiting for tcp-echo pod..."
+        kubectl --kubeconfig=/output/kubeconfig wait --for=condition=ready pod -l app=tcp-echo -n autotunnel-test --timeout=180s
+        echo "Waiting for tcp-echo-alt pod..."
+        kubectl --kubeconfig=/output/kubeconfig wait --for=condition=ready pod -l app=tcp-echo-alt -n autotunnel-test --timeout=180s
+        echo "Waiting for tcp-echo-standalone pod..."
+        kubectl --kubeconfig=/output/kubeconfig wait --for=condition=ready pod/tcp-echo-standalone -n autotunnel-test --timeout=180s
 
         echo "Cluster ready!"
         tail -f /dev/null
@@ -68,6 +74,10 @@ services:
       - CGO_ENABLED=0
     command: >
       sh -c "
+        echo 'Installing kubectl...' &&
+        apk add --no-cache curl &&
+        curl -LO https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl &&
+        chmod +x kubectl && mv kubectl /usr/local/bin/ &&
         echo 'Building autotunnel...' &&
         go build -o autotunnel . &&
         echo 'Running integration tests...' &&

@@ -56,8 +56,8 @@ func TestPeekConn_IsTLS(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a pipe to simulate a connection
 			client, server := net.Pipe()
-			defer client.Close()
-			defer server.Close()
+			defer func() { _ = client.Close() }()
+			defer func() { _ = server.Close() }()
 
 			// Write test data from client side
 			go func() {
@@ -162,7 +162,7 @@ func TestMuxListener_ProtocolDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create muxListener: %v", err)
 	}
-	defer mux.Close()
+	defer func() { _ = mux.Close() }()
 
 	addr := mux.Listener.Addr().String()
 
@@ -172,7 +172,7 @@ func TestMuxListener_ProtocolDetection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to connect: %v", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Send HTTP request
 		_, _ = conn.Write([]byte("GET / HTTP/1.1\r\nHost: test.localhost\r\n\r\n"))
@@ -182,7 +182,7 @@ func TestMuxListener_ProtocolDetection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to accept: %v", err)
 		}
-		defer accepted.Close()
+		defer func() { _ = accepted.Close() }()
 
 		// Wrap and check
 		pc := newPeekConn(accepted)
@@ -283,7 +283,7 @@ func TestHTTPProxyHeaders(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("Expected 200, got %d", resp.StatusCode)
@@ -323,10 +323,10 @@ func TestTLSPassthrough_EndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("TLS dial failed: %v", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Send HTTP request over TLS
-		fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: test\r\n\r\n")
+		_, _ = fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: test\r\n\r\n")
 
 		// Read response
 		reader := bufio.NewReader(conn)
@@ -334,7 +334,7 @@ func TestTLSPassthrough_EndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to read response: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("Expected 200, got %d", resp.StatusCode)

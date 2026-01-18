@@ -413,3 +413,332 @@ spec:
   ports:
     - port: 80
       targetPort: 80
+---
+# ============================================================================
+# TCP Echo Services for TCP port-forwarding integration tests
+# ============================================================================
+
+# TCP Echo Service using socat - echoes back any data sent to it
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tcp-echo
+  namespace: autotunnel-test
+  labels:
+    app: tcp-echo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tcp-echo
+  template:
+    metadata:
+      labels:
+        app: tcp-echo
+    spec:
+      containers:
+        - name: tcp-echo
+          image: alpine:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache socat &&
+              socat TCP-LISTEN:9999,reuseaddr,fork EXEC:'cat'
+          ports:
+            - containerPort: 9999
+              name: tcp
+          readinessProbe:
+            tcpSocket:
+              port: 9999
+            initialDelaySeconds: 5
+            periodSeconds: 3
+---
+# Service for tcp-echo
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcp-echo
+  namespace: autotunnel-test
+spec:
+  selector:
+    app: tcp-echo
+  ports:
+    - port: 9999
+      targetPort: 9999
+      name: tcp
+---
+# Second TCP Echo Service on different port for multi-route testing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tcp-echo-alt
+  namespace: autotunnel-test
+  labels:
+    app: tcp-echo-alt
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tcp-echo-alt
+  template:
+    metadata:
+      labels:
+        app: tcp-echo-alt
+    spec:
+      containers:
+        - name: tcp-echo
+          image: alpine:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache socat &&
+              socat TCP-LISTEN:9998,reuseaddr,fork EXEC:'cat'
+          ports:
+            - containerPort: 9998
+              name: tcp
+          readinessProbe:
+            tcpSocket:
+              port: 9998
+            initialDelaySeconds: 5
+            periodSeconds: 3
+---
+# Service for tcp-echo-alt
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcp-echo-alt
+  namespace: autotunnel-test
+spec:
+  selector:
+    app: tcp-echo-alt
+  ports:
+    - port: 9998
+      targetPort: 9998
+      name: tcp
+---
+# Standalone TCP Echo Pod for direct pod targeting tests (no service)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tcp-echo-standalone
+  namespace: autotunnel-test
+  labels:
+    app: tcp-echo-standalone
+spec:
+  containers:
+    - name: tcp-echo
+      image: alpine:latest
+      command:
+        - /bin/sh
+        - -c
+        - |
+          apk add --no-cache socat &&
+          socat TCP-LISTEN:9999,reuseaddr,fork EXEC:'cat'
+      ports:
+        - containerPort: 9999
+          name: tcp
+      readinessProbe:
+        tcpSocket:
+          port: 9999
+        initialDelaySeconds: 10
+        periodSeconds: 5
+---
+# ============================================================================
+# Jump-Host (Socat) Services for exec+socat integration tests
+# These services test the socat/jump-host functionality:
+# - bastion-jump: Jump pod discovered via Service
+# - bastion-standalone: Jump pod targeted directly by name
+# - tcp-target: Simulates an external service (RDS/Cloud SQL) that's only
+#   reachable through the jump pod (in reality, it's reachable from anywhere
+#   in the cluster, but conceptually represents an external service)
+# ============================================================================
+
+# Bastion/Jump Pod Deployment - Has socat and nc installed for jump-host testing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bastion-jump
+  namespace: autotunnel-test
+  labels:
+    app: bastion-jump
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bastion-jump
+  template:
+    metadata:
+      labels:
+        app: bastion-jump
+    spec:
+      containers:
+        - name: bastion
+          image: alpine:3.19
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache socat netcat-openbsd &&
+              echo "Bastion pod ready with socat and nc" &&
+              sleep infinity
+          readinessProbe:
+            exec:
+              command: ["which", "socat"]
+            initialDelaySeconds: 5
+            periodSeconds: 3
+---
+# Service for bastion-jump (for service-based via discovery)
+apiVersion: v1
+kind: Service
+metadata:
+  name: bastion-jump
+  namespace: autotunnel-test
+spec:
+  selector:
+    app: bastion-jump
+  ports:
+    - port: 22
+      targetPort: 22
+      name: ssh
+---
+# Standalone bastion pod (for direct pod targeting tests)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bastion-standalone
+  namespace: autotunnel-test
+  labels:
+    app: bastion-standalone
+spec:
+  containers:
+    - name: bastion
+      image: alpine:3.19
+      command:
+        - /bin/sh
+        - -c
+        - |
+          apk add --no-cache socat netcat-openbsd &&
+          echo "Standalone bastion pod ready" &&
+          sleep infinity
+      readinessProbe:
+        exec:
+          command: ["which", "socat"]
+        initialDelaySeconds: 5
+        periodSeconds: 3
+---
+# TCP Target Service - Simulates external service (RDS, Cloud SQL, etc.)
+# The jump pod connects TO this service
+# Uses socat TCP echo on port 3306 (MySQL-like)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tcp-target
+  namespace: autotunnel-test
+  labels:
+    app: tcp-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tcp-target
+  template:
+    metadata:
+      labels:
+        app: tcp-target
+    spec:
+      containers:
+        - name: tcp-echo
+          image: alpine:3.19
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache socat &&
+              socat TCP-LISTEN:3306,reuseaddr,fork EXEC:'cat'
+          ports:
+            - containerPort: 3306
+              name: mysql
+          readinessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 5
+            periodSeconds: 3
+---
+# Service for tcp-target
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcp-target
+  namespace: autotunnel-test
+spec:
+  selector:
+    app: tcp-target
+  ports:
+    - port: 3306
+      targetPort: 3306
+      name: mysql
+---
+# ============================================================================
+# Multi-container bastion pod for container selection testing
+# Tests the via.container config option to select specific container
+# ============================================================================
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container-bastion
+  namespace: autotunnel-test
+  labels:
+    app: multi-container-bastion
+spec:
+  containers:
+    # Main container - runs a simple HTTP server (not used for jump)
+    - name: main
+      image: hashicorp/http-echo
+      args: ["-text=main-container", "-listen=:8080"]
+      ports:
+        - containerPort: 8080
+          name: http
+    # Socat container - used for jump functionality
+    - name: socat
+      image: alpine:3.19
+      command:
+        - /bin/sh
+        - -c
+        - |
+          apk add --no-cache socat &&
+          echo "Socat container ready" &&
+          sleep infinity
+      readinessProbe:
+        exec:
+          command: ["which", "socat"]
+        initialDelaySeconds: 5
+        periodSeconds: 3
+---
+# ============================================================================
+# NC-only bastion pod for testing netcat fallback (no socat installed)
+# Uses busybox which has nc but not socat
+# ============================================================================
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nc-only-bastion
+  namespace: autotunnel-test
+  labels:
+    app: nc-only-bastion
+spec:
+  containers:
+    - name: bastion
+      image: busybox:1.36
+      command:
+        - /bin/sh
+        - -c
+        - |
+          echo "NC-only bastion ready (no socat)" &&
+          sleep infinity
+      readinessProbe:
+        exec:
+          command: ["which", "nc"]
+        initialDelaySeconds: 2
+        periodSeconds: 3

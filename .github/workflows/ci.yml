@@ -24,7 +24,7 @@ jobs:
           git diff --exit-code go.mod go.sum
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           args: --timeout=3m
@@ -66,6 +66,14 @@ jobs:
           kubectl wait --for=condition=ready pod -l app=websocket-echo -n autotunnel-test --timeout=120s
           kubectl wait --for=condition=ready pod -l app=standalone-pod -n autotunnel-test --timeout=120s
           kubectl wait --for=condition=ready pod -l app=echo-headers -n autotunnel-test --timeout=120s
+          # TCP echo services
+          kubectl wait --for=condition=ready pod -l app=tcp-echo -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=tcp-echo-alt -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=tcp-echo-standalone -n autotunnel-test --timeout=120s
+          # Socat/jump-host test services
+          kubectl wait --for=condition=ready pod -l app=bastion-jump -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=bastion-standalone -n autotunnel-test --timeout=120s
+          kubectl wait --for=condition=ready pod -l app=tcp-target -n autotunnel-test --timeout=120s
 
       - name: Build binary
         run: go build -o autotunnel .

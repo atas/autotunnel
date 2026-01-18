@@ -1,0 +1,41 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - staticcheck
+    - govet
+    - ineffassign
+
+  settings:
+    errcheck:
+      # Ignore errors from Close() and similar cleanup functions
+      exclude-functions:
+        - (net.Conn).Close
+        - (*net.TCPConn).Close
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*io.PipeReader).Close
+        - (*io.PipeWriter).Close
+        - (net.Listener).Close
+        - (*crypto/tls.Conn).Close
+        - (*github.com/fsnotify/fsnotify.Watcher).Close
+        - (*github.com/atas/autotunnel/internal/httpserver.muxListener).Close
+        - os.Setenv
+        - os.Unsetenv
+        - fmt.Fprintf
+        - fmt.Fprint
+        - fmt.Fprintln
+
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000"  # Package comment
+        - "-ST1003"  # Naming convention (ApiVersion vs APIVersion)
+        - "-ST1023"  # Should omit type from declaration
+        - "-QF1008"  # Could remove embedded field from selector
+        - "-QF1011"  # Could omit type from declaration
+
+run:
+  timeout: 3m

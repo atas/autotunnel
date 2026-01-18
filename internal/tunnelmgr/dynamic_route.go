@@ -7,16 +7,9 @@ import (
 	"github.com/atas/autotunnel/internal/config"
 )
 
-// ParseDynamicHostname parses a dynamic hostname into a K8sRouteConfig.
-// Supports both services and pods:
-//   - Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamicHost}
-//   - Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamicHost}
-//
-// Examples:
-//   - argocd-server-443.svc.argocd.ns.my-cluster.cx.k8s.localhost
-//   - nginx-2fxac-80.pod.default.ns.microk8s.cx.k8s.localhost
-//
-// Returns the parsed config and true if valid, nil and false otherwise.
+// ParseDynamicHostname extracts k8s routing info from specially formatted hostnames.
+// Format: {name}-{port}.{svc|pod}.{namespace}.ns.{context}.cx.{suffix}
+// e.g. argocd-server-443.svc.argocd.ns.microk8s.cx.k8s.localhost
 func ParseDynamicHostname(hostname, dynamicHost, scheme string) (*config.K8sRouteConfig, bool) {
 	if dynamicHost == "" {
 		return nil, false

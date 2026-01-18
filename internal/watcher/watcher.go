@@ -9,15 +9,14 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// ConfigUpdater is an interface for updating configuration
 type ConfigUpdater interface {
-	UpdateConfig(newConfig *config.Config)
+	UpdateConfig(cfg *config.Config)
 }
 
-// ConfigWatcher watches the config file for changes and reloads on valid updates
 type ConfigWatcher struct {
 	configPath string
 	manager    ConfigUpdater
+	tcpServer  ConfigUpdater
 	watcher    *fsnotify.Watcher
 	cliVerbose bool // Preserve CLI --verbose flag across reloads
 
@@ -28,7 +27,6 @@ type ConfigWatcher struct {
 	doneChan chan struct{}
 }
 
-// NewConfigWatcher creates a new config file watcher
 func NewConfigWatcher(configPath string, initialConfig *config.Config, manager ConfigUpdater, cliVerbose bool) (*ConfigWatcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -51,16 +49,18 @@ func NewConfigWatcher(configPath string, initialConfig *config.Config, manager C
 	}, nil
 }
 
-// Start begins watching the config file for changes
 func (cw *ConfigWatcher) Start() {
 	go cw.watchLoop()
 }
 
-// Stop stops the config watcher
 func (cw *ConfigWatcher) Stop() {
 	close(cw.stopChan)
 	cw.watcher.Close()
 	<-cw.doneChan
+}
+
+func (cw *ConfigWatcher) SetTCPServer(tcpServer ConfigUpdater) {
+	cw.tcpServer = tcpServer
 }
 
 func (cw *ConfigWatcher) watchLoop() {
@@ -84,16 +84,12 @@ func (cw *ConfigWatcher) watchLoop() {
 				return
 			}
 
-			// React to write, create, chmod, or rename events
-			// Rename is needed because editors like vim/nano use atomic saves (write temp, rename)
+			// vim/nano do atomic saves (write temp, rename), so we need to watch for Rename too
 			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Chmod|fsnotify.Rename) != 0 {
-				// After rename, the old inode is gone - re-watch the file path
+				// after rename, old inode is gone so we need to re-watch the path
 				if event.Op&fsnotify.Rename != 0 {
-					// Small delay to let the new file appear
-					time.Sleep(100 * time.Millisecond)
-					// Remove old watch (may fail if already gone, that's ok)
+					time.Sleep(100 * time.Millisecond) // let new file appear
 					_ = cw.watcher.Remove(cw.configPath)
-					// Add watch for the new file at this path
 					_ = cw.watcher.Add(cw.configPath)
 				}
 
@@ -119,14 +115,12 @@ func (cw *ConfigWatcher) watchLoop() {
 func (cw *ConfigWatcher) reloadConfig() {
 	log.Println("Config file changed, reloading...")
 
-	// LoadConfig now includes validation
 	newConfig, err := config.LoadConfig(cw.configPath)
 	if err != nil {
 		log.Printf("Failed to load config: %v (keeping current config)", err)
 		return
 	}
 
-	// Preserve CLI verbose flag
 	if cw.cliVerbose {
 		newConfig.Verbose = true
 	}
@@ -137,6 +131,12 @@ func (cw *ConfigWatcher) reloadConfig() {
 
 	cw.manager.UpdateConfig(newConfig)
 
+	if cw.tcpServer != nil {
+		cw.tcpServer.UpdateConfig(newConfig)
+	}
+
 	log.Println("Config reloaded successfully")
-	newConfig.LogRoutes()
+	newConfig.PrintRoutes()
+	newConfig.PrintTCPRoutes()
+	newConfig.PrintJumpRoutes()
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/atas/autotunnel/internal/tunnel"
 )
 
-// TunnelHandle provides access to tunnel operations needed by the HTTP server and manager
 type TunnelHandle interface {
 	IsRunning() bool
 	Start(ctx context.Context) error
@@ -17,9 +16,9 @@ type TunnelHandle interface {
 	Touch()
 	IdleDuration() time.Duration
 	State() tunnel.State
+	LastError() error
 }
 
-// TunnelInfo contains information about a tunnel for display purposes
 type TunnelInfo struct {
 	Hostname     string
 	LocalPort    int
@@ -27,7 +26,6 @@ type TunnelInfo struct {
 	IdleDuration time.Duration
 }
 
-// ActiveTunnels returns the count of currently active tunnels
 func (m *Manager) ActiveTunnels() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -41,7 +39,6 @@ func (m *Manager) ActiveTunnels() int {
 	return count
 }
 
-// ListTunnels returns information about all tunnels
 func (m *Manager) ListTunnels() []TunnelInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

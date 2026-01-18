@@ -12,47 +12,42 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// TunnelFactory creates a new tunnel instance
+// TunnelFactory is injectable for testing - swap in mocks instead of real tunnels
 type TunnelFactory func(hostname string, cfg config.K8sRouteConfig,
 	clientset kubernetes.Interface, restConfig *rest.Config,
 	listenAddr string, verbose bool) TunnelHandle
 
-// defaultTunnelFactory creates real tunnel instances
 func defaultTunnelFactory(hostname string, cfg config.K8sRouteConfig,
 	clientset kubernetes.Interface, restConfig *rest.Config,
 	listenAddr string, verbose bool) TunnelHandle {
 	return tunnel.NewTunnel(hostname, cfg, clientset, restConfig, listenAddr, verbose)
 }
 
-// Manager handles the lifecycle of all tunnels
 type Manager struct {
 	mu sync.RWMutex
 
-	// Configuration
 	config *config.Config
 
-	// Active tunnels keyed by hostname
-	tunnels map[string]TunnelHandle
+	tunnels    map[string]TunnelHandle // HTTP: hostname -> tunnel
+	tcpTunnels map[int]TunnelHandle    // TCP: local port -> tunnel
+	tcpTunnelsMu sync.RWMutex
 
-	// Factory for creating tunnels (enables testing with mocks)
 	tunnelFactory TunnelFactory
 
-	// Cached k8s clients per context name
-	k8sClients   map[string]*k8sClient
+	k8sClients   map[string]*k8sClient // one client per k8s context
 	k8sClientsMu sync.RWMutex
 
-	// Shutdown coordination
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
 
-// NewManager creates a new tunnel manager
 func NewManager(cfg *config.Config) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		config:        cfg,
 		tunnels:       make(map[string]TunnelHandle),
+		tcpTunnels:    make(map[int]TunnelHandle),
 		tunnelFactory: defaultTunnelFactory,
 		k8sClients:    make(map[string]*k8sClient),
 		ctx:           ctx,
@@ -60,14 +55,17 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 }
 
-// Start begins the manager's background tasks
 func (m *Manager) Start() {
 	m.wg.Add(1)
 	go m.idleCleanupLoop()
 	fmt.Printf("Idle timeout: %v\n", m.config.HTTP.IdleTimeout)
+
+	// Print TCP idle timeout if different from HTTP
+	if m.config.TCP.IdleTimeout > 0 && m.config.TCP.IdleTimeout != m.config.HTTP.IdleTimeout {
+		fmt.Printf("TCP idle timeout: %v\n", m.config.TCP.IdleTimeout)
+	}
 }
 
-// Shutdown gracefully stops all tunnels
 func (m *Manager) Shutdown() {
 	log.Println("Shutting down tunnel manager...")
 	m.cancel()
@@ -82,7 +80,16 @@ func (m *Manager) Shutdown() {
 	m.tunnels = make(map[string]TunnelHandle)
 	m.mu.Unlock()
 
-	// Clear cached k8s clients
+	m.tcpTunnelsMu.Lock()
+	for port, tunnel := range m.tcpTunnels {
+		if tunnel.IsRunning() {
+			log.Printf("Stopping TCP tunnel for port %d", port)
+			tunnel.Stop()
+		}
+	}
+	m.tcpTunnels = make(map[int]TunnelHandle)
+	m.tcpTunnelsMu.Unlock()
+
 	m.k8sClientsMu.Lock()
 	m.k8sClients = make(map[string]*k8sClient)
 	m.k8sClientsMu.Unlock()
@@ -91,7 +98,6 @@ func (m *Manager) Shutdown() {
 	log.Println("Tunnel manager stopped")
 }
 
-// UpdateConfig updates the manager's configuration and cleans up removed routes
 func (m *Manager) UpdateConfig(newConfig *config.Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -99,7 +105,7 @@ func (m *Manager) UpdateConfig(newConfig *config.Config) {
 	oldRoutes := m.config.HTTP.K8s.Routes
 	newRoutes := newConfig.HTTP.K8s.Routes
 
-	// Stop tunnels for removed routes
+	// tear down HTTP tunnels for routes that no longer exist
 	for hostname := range oldRoutes {
 		if _, exists := newRoutes[hostname]; !exists {
 			if tunnel, ok := m.tunnels[hostname]; ok {
@@ -110,5 +116,26 @@ func (m *Manager) UpdateConfig(newConfig *config.Config) {
 		}
 	}
 
+	// tear down TCP tunnels for routes that no longer exist
+	m.tcpTunnelsMu.Lock()
+	oldTCPRoutes := m.config.TCP.K8s.Routes
+	newTCPRoutes := newConfig.TCP.K8s.Routes
+	for port := range oldTCPRoutes {
+		if _, exists := newTCPRoutes[port]; !exists {
+			if tunnel, ok := m.tcpTunnels[port]; ok {
+				log.Printf("TCP route removed, stopping tunnel for port: %d", port)
+				tunnel.Stop()
+				delete(m.tcpTunnels, port)
+			}
+		}
+	}
+	m.tcpTunnelsMu.Unlock()
+
 	m.config = newConfig
+}
+
+
+// GetClientForContext is exposed so tcpserver's jump handler can reuse our k8s clients
+func (m *Manager) GetClientForContext(kubeconfigPaths []string, contextName string) (*kubernetes.Clientset, *rest.Config, error) {
+	return m.getClientsetAndConfig(kubeconfigPaths, contextName)
 }

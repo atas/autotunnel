@@ -10,7 +10,6 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// State represents the current state of a tunnel
 type State int
 
 const (
@@ -38,34 +37,27 @@ func (s State) String() string {
 	}
 }
 
-// Tunnel manages a single port-forward connection to a Kubernetes service or pod
 type Tunnel struct {
 	mu sync.RWMutex
 
-	// Configuration
 	hostname   string
 	config     config.K8sRouteConfig
 	listenAddr string
 	verbose    bool
 
-	// Shared k8s resources (from Manager)
 	clientset  kubernetes.Interface
 	restConfig *rest.Config
 
-	// State
 	state      State
 	localPort  int
 	lastAccess time.Time
 
-	// Port-forward resources
 	stopChan  chan struct{}
 	readyChan chan struct{}
 
-	// Error tracking
 	lastError error
 }
 
-// NewTunnel creates a new tunnel instance
 func NewTunnel(hostname string, cfg config.K8sRouteConfig, clientset kubernetes.Interface, restConfig *rest.Config, listenAddr string, verbose bool) *Tunnel {
 	return &Tunnel{
 		hostname:   hostname,
@@ -79,7 +71,6 @@ func NewTunnel(hostname string, cfg config.K8sRouteConfig, clientset kubernetes.
 	}
 }
 
-// Start initiates the port-forward connection
 func (t *Tunnel) Start(ctx context.Context) error {
 	t.mu.Lock()
 	if t.state == StateRunning {
@@ -92,7 +83,6 @@ func (t *Tunnel) Start(ctx context.Context) error {
 	return t.startPortForward(ctx)
 }
 
-// Stop gracefully terminates the port-forward
 func (t *Tunnel) Stop() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -108,14 +98,12 @@ func (t *Tunnel) Stop() {
 	t.state = StateIdle
 }
 
-// IsRunning returns true if the tunnel is active
 func (t *Tunnel) IsRunning() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.state == StateRunning
 }
 
-// State returns the current tunnel state
 func (t *Tunnel) State() State {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
