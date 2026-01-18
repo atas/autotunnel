@@ -75,6 +75,10 @@ func (m *mockTunnel) IdleDuration() time.Duration {
 	return m.idleDuration
 }
 
+func (m *mockTunnel) LastError() error {
+	return nil
+}
+
 func (m *mockTunnel) State() tunnel.State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/k8sutil"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -187,42 +188,12 @@ func (h *JumpHandler) discoverJumpPod(ctx context.Context) (podName string, cont
 		return "", "", fmt.Errorf("failed to get service %s: %w", h.route.Via.Service, err)
 	}
 
-	pod, err := h.findReadyPod(ctx, svc.Spec.Selector)
+	pod, err := k8sutil.FindReadyPod(ctx, h.clientset, h.route.Namespace, svc.Spec.Selector, h.route.Via.Service)
 	if err != nil {
 		return "", "", err
 	}
 
 	return pod.Name, containerName, nil
-}
-
-func (h *JumpHandler) findReadyPod(ctx context.Context, selectorLabels map[string]string) (*corev1.Pod, error) {
-	selector := metav1.FormatLabelSelector(&metav1.LabelSelector{
-		MatchLabels: selectorLabels,
-	})
-
-	pods, err := h.clientset.CoreV1().Pods(h.route.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector,
-		FieldSelector: "status.phase=Running",
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	if len(pods.Items) == 0 {
-		return nil, fmt.Errorf("no running pods found for service %s", h.route.Via.Service)
-	}
-
-	// Select the first ready pod
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		for _, cond := range pod.Status.Conditions {
-			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-				return pod, nil
-			}
-		}
-	}
-
-	return &pods.Items[0], nil
 }
 
 func (h *JumpHandler) buildForwardCommand() (string, error) {

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/k8sutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -155,17 +156,12 @@ func TestFindReadyPod_PrefersReadyPod(t *testing.T) {
 
 	fakeClient := fake.NewSimpleClientset(notReadyPod, readyPod)
 
-	tunnel := &Tunnel{
-		clientset: fakeClient,
-		config:    config.K8sRouteConfig{Namespace: "test-ns", Service: "test-svc"},
-	}
-
-	pod, err := tunnel.findReadyPod(ctx, map[string]string{"app": "test"})
+	pod, err := k8sutil.FindReadyPod(ctx, fakeClient, "test-ns", map[string]string{"app": "test"}, "test-svc")
 	if err != nil {
-		t.Fatalf("findReadyPod() error = %v", err)
+		t.Fatalf("FindReadyPod() error = %v", err)
 	}
 	if pod.Name != "pod-ready" {
-		t.Errorf("findReadyPod() selected %q, want %q", pod.Name, "pod-ready")
+		t.Errorf("FindReadyPod() selected %q, want %q", pod.Name, "pod-ready")
 	}
 }
 
@@ -189,17 +185,12 @@ func TestFindReadyPod_FallsBackToRunning(t *testing.T) {
 
 	fakeClient := fake.NewSimpleClientset(runningPod)
 
-	tunnel := &Tunnel{
-		clientset: fakeClient,
-		config:    config.K8sRouteConfig{Namespace: "test-ns", Service: "test-svc"},
-	}
-
-	pod, err := tunnel.findReadyPod(ctx, map[string]string{"app": "test"})
+	pod, err := k8sutil.FindReadyPod(ctx, fakeClient, "test-ns", map[string]string{"app": "test"}, "test-svc")
 	if err != nil {
-		t.Fatalf("findReadyPod() error = %v", err)
+		t.Fatalf("FindReadyPod() error = %v", err)
 	}
 	if pod.Name != "pod-running" {
-		t.Errorf("findReadyPod() selected %q, want %q", pod.Name, "pod-running")
+		t.Errorf("FindReadyPod() selected %q, want %q", pod.Name, "pod-running")
 	}
 }
 
@@ -208,14 +199,9 @@ func TestFindReadyPod_NoPods(t *testing.T) {
 
 	fakeClient := fake.NewSimpleClientset()
 
-	tunnel := &Tunnel{
-		clientset: fakeClient,
-		config:    config.K8sRouteConfig{Namespace: "test-ns", Service: "test-svc"},
-	}
-
-	_, err := tunnel.findReadyPod(ctx, map[string]string{"app": "test"})
+	_, err := k8sutil.FindReadyPod(ctx, fakeClient, "test-ns", map[string]string{"app": "test"}, "test-svc")
 	if err == nil {
-		t.Fatal("findReadyPod() expected error for no pods, got nil")
+		t.Fatal("FindReadyPod() expected error for no pods, got nil")
 	}
 }
 
@@ -239,14 +225,9 @@ func TestFindReadyPod_IgnoresNonMatchingLabels(t *testing.T) {
 
 	fakeClient := fake.NewSimpleClientset(differentPod)
 
-	tunnel := &Tunnel{
-		clientset: fakeClient,
-		config:    config.K8sRouteConfig{Namespace: "test-ns", Service: "test-svc"},
-	}
-
-	_, err := tunnel.findReadyPod(ctx, map[string]string{"app": "test"})
+	_, err := k8sutil.FindReadyPod(ctx, fakeClient, "test-ns", map[string]string{"app": "test"}, "test-svc")
 	if err == nil {
-		t.Fatal("findReadyPod() expected error when no matching pods, got nil")
+		t.Fatal("FindReadyPod() expected error when no matching pods, got nil")
 	}
 }
 

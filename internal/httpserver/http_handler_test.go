@@ -45,6 +45,7 @@ func (m *mockTunnel) Scheme() string {
 func (m *mockTunnel) Touch()                       { m.touchCalled = true }
 func (m *mockTunnel) IdleDuration() time.Duration  { return 0 }
 func (m *mockTunnel) State() tunnel.State          { return tunnel.StateRunning }
+func (m *mockTunnel) LastError() error             { return nil }
 
 // mockManager implements Manager interface for testing
 type mockManager struct {

@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"container/list"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -12,14 +13,28 @@ import (
 	"time"
 )
 
+const (
+	// maxCertCacheSize is the maximum number of certificates to cache
+	maxCertCacheSize = 1000
+)
+
+// certCacheEntry holds a cached certificate and its key in the LRU list
+type certCacheEntry struct {
+	hostname string
+	cert     *tls.Certificate
+}
+
 // tlsErrorCertProvider generates on-the-fly certs for TLS error pages.
 // Creates a CA once, then mints short-lived per-hostname certs as needed.
+// Uses LRU eviction to bound memory usage while keeping frequently-used certs cached.
 type tlsErrorCertProvider struct {
 	caCert *x509.Certificate
 	caKey  *ecdsa.PrivateKey
 
-	certCache map[string]*tls.Certificate
-	cacheMu   sync.RWMutex
+	// LRU cache: map for O(1) lookup, list for access order tracking
+	certCache map[string]*list.Element
+	lruList   *list.List
+	cacheMu   sync.Mutex
 }
 
 func newTLSErrorCertProvider() (*tlsErrorCertProvider, error) {
@@ -55,29 +70,54 @@ func newTLSErrorCertProvider() (*tlsErrorCertProvider, error) {
 	return &tlsErrorCertProvider{
 		caCert:    caCert,
 		caKey:     caKey,
-		certCache: make(map[string]*tls.Certificate),
+		certCache: make(map[string]*list.Element),
+		lruList:   list.New(),
 	}, nil
 }
 
 func (p *tlsErrorCertProvider) GetCertificate(hostname string) (*tls.Certificate, error) {
-	p.cacheMu.RLock()
-	if cert, ok := p.certCache[hostname]; ok {
-		p.cacheMu.RUnlock()
+	p.cacheMu.Lock()
+
+	// Check if cert exists in cache
+	if elem, ok := p.certCache[hostname]; ok {
+		// Move to front (most recently used)
+		p.lruList.MoveToFront(elem)
+		cert := elem.Value.(*certCacheEntry).cert
+		p.cacheMu.Unlock()
 		return cert, nil
 	}
-	p.cacheMu.RUnlock()
+	p.cacheMu.Unlock()
 
+	// Generate new cert (outside lock to avoid blocking other lookups)
 	cert, err := p.generateCert(hostname)
 	if err != nil {
 		return nil, err
 	}
 
-	// cap cache size to avoid unbounded memory growth
+	// Add to cache with LRU eviction
 	p.cacheMu.Lock()
-	if len(p.certCache) < 1000 {
-		p.certCache[hostname] = cert
+	defer p.cacheMu.Unlock()
+
+	// Double-check after reacquiring lock (another goroutine may have added it)
+	if elem, ok := p.certCache[hostname]; ok {
+		p.lruList.MoveToFront(elem)
+		return elem.Value.(*certCacheEntry).cert, nil
 	}
-	p.cacheMu.Unlock()
+
+	// Evict least recently used if at capacity
+	if p.lruList.Len() >= maxCertCacheSize {
+		oldest := p.lruList.Back()
+		if oldest != nil {
+			entry := oldest.Value.(*certCacheEntry)
+			delete(p.certCache, entry.hostname)
+			p.lruList.Remove(oldest)
+		}
+	}
+
+	// Add new entry at front (most recently used)
+	entry := &certCacheEntry{hostname: hostname, cert: cert}
+	elem := p.lruList.PushFront(entry)
+	p.certCache[hostname] = elem
 
 	return cert, nil
 }

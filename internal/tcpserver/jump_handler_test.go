@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/k8sutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -236,15 +237,9 @@ func TestJumpHandler_findReadyPod_SelectsReady(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset(readyPod, notReadyPod)
 
-	route := config.JumpRouteConfig{
-		Namespace: "test-ns",
-		Via:       config.ViaConfig{Service: "svc"},
-	}
-	handler := NewJumpHandler(route, nil, clientset, nil, false)
-
-	pod, err := handler.findReadyPod(context.Background(), map[string]string{"app": "jump"})
+	pod, err := k8sutil.FindReadyPod(context.Background(), clientset, "test-ns", map[string]string{"app": "jump"}, "svc")
 	if err != nil {
-		t.Fatalf("findReadyPod failed: %v", err)
+		t.Fatalf("FindReadyPod failed: %v", err)
 	}
 
 	if pod.Name != "ready-pod" {
@@ -270,15 +265,9 @@ func TestJumpHandler_findReadyPod_FallbackToRunning(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset(runningPod)
 
-	route := config.JumpRouteConfig{
-		Namespace: "test-ns",
-		Via:       config.ViaConfig{Service: "svc"},
-	}
-	handler := NewJumpHandler(route, nil, clientset, nil, false)
-
-	pod, err := handler.findReadyPod(context.Background(), map[string]string{"app": "jump"})
+	pod, err := k8sutil.FindReadyPod(context.Background(), clientset, "test-ns", map[string]string{"app": "jump"}, "svc")
 	if err != nil {
-		t.Fatalf("findReadyPod failed: %v", err)
+		t.Fatalf("FindReadyPod failed: %v", err)
 	}
 
 	// Should fall back to the running pod even though not ready
@@ -315,6 +304,20 @@ func TestJumpHandler_buildForwardCommand(t *testing.T) {
 			targetPort: 5432,
 			wantSocat:  "socat - TCP:mydb.cluster-xyz.us-east-1.rds.amazonaws.com:5432",
 			wantNc:     "nc mydb.cluster-xyz.us-east-1.rds.amazonaws.com 5432",
+		},
+		{
+			name:       "IPv6 address",
+			targetHost: "2001:db8::1",
+			targetPort: 5432,
+			wantSocat:  "socat - TCP:[2001:db8::1]:5432",
+			wantNc:     "nc [2001:db8::1] 5432",
+		},
+		{
+			name:       "IPv6 loopback",
+			targetHost: "::1",
+			targetPort: 3306,
+			wantSocat:  "socat - TCP:[::1]:3306",
+			wantNc:     "nc [::1] 3306",
 		},
 	}
 

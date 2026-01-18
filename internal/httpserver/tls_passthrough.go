@@ -13,8 +13,8 @@ import (
 func (s *Server) handleTLSConnection(conn *peekConn) {
 	defer conn.Close()
 
-	// give slow clients 10s to send ClientHello
-	_ = conn.Conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	// give slow clients time to send ClientHello
+	_ = conn.Conn.SetReadDeadline(time.Now().Add(TLSClientHelloDeadline))
 
 	// Read enough for ClientHello
 	buf := make([]byte, 16384)
@@ -47,7 +47,7 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	}
 
 	if !tunnel.IsRunning() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), TLSTunnelStartTimeout)
 		if err := tunnel.Start(ctx); err != nil {
 			cancel()
 			log.Printf("[tls] [%s] Failed to start tunnel: %v", sni, err)
@@ -60,7 +60,7 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	tunnel.Touch()
 
 	backendAddr := fmt.Sprintf("127.0.0.1:%d", tunnel.LocalPort())
-	backendConn, err := net.DialTimeout("tcp", backendAddr, 10*time.Second)
+	backendConn, err := net.DialTimeout("tcp", backendAddr, TLSBackendDialTimeout)
 	if err != nil {
 		log.Printf("[tls] [%s] Failed to connect to backend: %v", sni, err)
 		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorBackendConnection, fmt.Sprintf("Failed to connect to backend: %v", err))

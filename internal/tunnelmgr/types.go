@@ -16,6 +16,7 @@ type TunnelHandle interface {
 	Touch()
 	IdleDuration() time.Duration
 	State() tunnel.State
+	LastError() error
 }
 
 type TunnelInfo struct {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/atas/autotunnel/internal/k8sutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/portforward"
@@ -65,8 +66,9 @@ func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port in
 		}
 	}
 
-	targetPod, err := t.findReadyPod(ctx, svc.Spec.Selector)
+	targetPod, err := k8sutil.FindReadyPod(ctx, t.clientset, t.config.Namespace, svc.Spec.Selector, t.config.Service)
 	if err != nil {
+		t.setFailed(err)
 		return "", 0, err
 	}
 
@@ -82,40 +84,6 @@ func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port in
 	}
 
 	return targetPod.Name, port, nil
-}
-
-func (t *Tunnel) findReadyPod(ctx context.Context, selectorLabels map[string]string) (*corev1.Pod, error) {
-	selector := metav1.FormatLabelSelector(&metav1.LabelSelector{
-		MatchLabels: selectorLabels,
-	})
-
-	pods, err := t.clientset.CoreV1().Pods(t.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: selector,
-		FieldSelector: "status.phase=Running",
-	})
-	if err != nil {
-		t.setFailed(err)
-		return nil, fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	if len(pods.Items) == 0 {
-		err := fmt.Errorf("no running pods found for service %s", t.config.Service)
-		t.setFailed(err)
-		return nil, err
-	}
-
-	// Select the first ready pod
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		for _, cond := range pod.Status.Conditions {
-			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-				return pod, nil
-			}
-		}
-	}
-
-	// not ideal but better than failing - pod might still work
-	return &pods.Items[0], nil
 }
 
 func (t *Tunnel) resolveNamedPort(pod *corev1.Pod, portName string) (int, error) {
@@ -190,7 +158,7 @@ func (t *Tunnel) waitForReady(ctx context.Context, fw *portforward.PortForwarder
 		t.mu.Unlock()
 		return ctx.Err()
 
-	case <-time.After(30 * time.Second):
+	case <-time.After(PortForwardReadyTimeout):
 		close(t.stopChan)
 		err := fmt.Errorf("timeout waiting for port forward to be ready")
 		t.setFailed(err)

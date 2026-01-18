@@ -66,7 +66,10 @@ func (s *Server) sendTLSErrorPage(conn net.Conn, clientHello []byte, hostname st
 	tlsConn := tls.Server(replayConn, tlsConfig)
 	defer tlsConn.Close()
 
-	if err := tlsConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+	if err := tlsConn.SetDeadline(time.Now().Add(TLSErrorPageDeadline)); err != nil {
+		if s.config.Verbose {
+			log.Printf("[tls] [%s] Failed to set deadline for error page: %v", hostname, err)
+		}
 		return
 	}
 

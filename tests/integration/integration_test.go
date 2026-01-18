@@ -2687,6 +2687,148 @@ func TestJumpPodReadyTimeout(t *testing.T) {
 	verifyPodState(t, podName, namespace)
 }
 
+// TestConfigHotReload tests that config file changes are automatically detected and applied
+func TestConfigHotReload(t *testing.T) {
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	}
+
+	// Create initial config with auto_reload_config enabled
+	initialConfig := fmt.Sprintf(`apiVersion: autotunnel/v1
+verbose: true
+auto_reload_config: true
+http:
+  listen: ":18989"
+  idle_timeout: %s
+  k8s:
+    kubeconfig: %s
+    routes:
+      nginx.localhost:
+        context: %s
+        namespace: autotunnel-test
+        service: nginx
+        port: 80
+`, idleTimeout, kubeconfig, getTestContext())
+
+	// Write initial config to temp file
+	tmpFile, err := os.CreateTemp("", "autotunnel-hotreload-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp config: %v", err)
+	}
+	configPath := tmpFile.Name()
+	t.Cleanup(func() {
+		os.Remove(configPath)
+	})
+
+	if _, err := tmpFile.WriteString(initialConfig); err != nil {
+		t.Fatalf("Failed to write initial config: %v", err)
+	}
+	tmpFile.Close()
+
+	// Start autotunnel with hot-reload enabled
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Test 1: Request to initial route (nginx) should work
+	t.Run("initial route works", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "http://"+proxyAddr+"/", nil)
+		req.Host = "nginx.localhost"
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Initial route request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	// Test 2: Request to non-existent route (echo) should fail with 502
+	t.Run("new route not yet configured", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "http://"+proxyAddr+"/", nil)
+		req.Host = "echo.localhost"
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadGateway {
+			t.Errorf("Expected 502 for unconfigured route, got %d", resp.StatusCode)
+		}
+	})
+
+	// Update config to add a new route
+	updatedConfig := fmt.Sprintf(`apiVersion: autotunnel/v1
+verbose: true
+auto_reload_config: true
+http:
+  listen: ":18989"
+  idle_timeout: %s
+  k8s:
+    kubeconfig: %s
+    routes:
+      nginx.localhost:
+        context: %s
+        namespace: autotunnel-test
+        service: nginx
+        port: 80
+      echo.localhost:
+        context: %s
+        namespace: autotunnel-test
+        service: echo
+        port: 80
+`, idleTimeout, kubeconfig, getTestContext(), getTestContext())
+
+	// Write updated config
+	if err := os.WriteFile(configPath, []byte(updatedConfig), 0644); err != nil {
+		t.Fatalf("Failed to write updated config: %v", err)
+	}
+
+	// Wait for hot-reload to detect the change (debounce is 500ms, plus some buffer)
+	time.Sleep(2 * time.Second)
+
+	// Test 3: Request to new route (echo) should now work
+	t.Run("new route works after reload", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "http://"+proxyAddr+"/", nil)
+		req.Host = "echo.localhost"
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("New route request failed after reload: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected 200 for new route after reload, got %d", resp.StatusCode)
+		}
+	})
+
+	// Test 4: Original route (nginx) should still work
+	t.Run("original route still works after reload", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "http://"+proxyAddr+"/", nil)
+		req.Host = "nginx.localhost"
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Original route request failed after reload: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected 200 for original route after reload, got %d", resp.StatusCode)
+		}
+	})
+}
+
 // verifyPodState checks and logs the state of the test pod
 func verifyPodState(t *testing.T, podName, namespace string) {
 	t.Helper()
