@@ -166,7 +166,10 @@ tcp:
          #   service: postgresql
          #   port: 5432 # remote port
 
-      # Jump routes for VPC-internal services (RDS, Cloud SQL, etc.)
+      # Jump-host routes via kubectl exec + socat/nc
+      # Use this to connect to VPC-internal services (RDS, Cloud SQL, etc.)
+      # through a jump pod that has network access to those services.
+      # ! NEED socat or nc (netcat) installed in the jump pod.
       jump:
          # # AWS RDS via existing pod (discovered from service)
          # 3306: # local port
@@ -186,6 +189,7 @@ tcp:
          #     pod: autotunnel-jump
          #     create: # Optional, auto-create if there is no pod with socat/nc you can use
          #       image: alpine/socat:latest
+         #       # command: ["sleep", "infinity"]  # Optional: custom idle command (default: ["sleep", "infinity"])
          #   target:
          #     host: my-redis.cache.amazonaws.com
          #     port: 6379
@@ -316,7 +320,7 @@ tcp:
 
     # Jump-host routes for VPC-internal services (RDS, Cloud SQL, etc.)
     # Connects through a jump pod that has network access to the target.
-    # Requires socat or nc (netcat) installed in the jump pod.
+    # ! NEED socat or nc (netcat) installed in the jump pod.
     jump:
       # AWS RDS MySQL via existing jump pod
       3306:
@@ -338,6 +342,7 @@ tcp:
           pod: autotunnel-jump      # Pod name to create & re-use
           create:
             image: alpine/socat:latest  # Auto-create pod with this image
+            # command: ["sleep", "infinity"]  # Optional: custom idle command (default: ["sleep", "infinity"])
         target:
           host: 10.0.0.5            # VPC-internal IP
           port: 5432

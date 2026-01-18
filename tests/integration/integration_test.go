@@ -1627,14 +1627,15 @@ func TestTCPBidirectionalData(t *testing.T) {
 
 // jumpRouteConfig represents a jump-host route configuration for tests
 type jumpRouteConfig struct {
-	Context     string
-	Namespace   string
-	ViaService  string // Jump pod discovered via service (mutually exclusive with ViaPod)
-	ViaPod      string // Jump pod by direct name (mutually exclusive with ViaService)
-	Container   string // Optional container name for multi-container pods
-	CreateImage string // Optional: auto-create pod with this image if it doesn't exist
-	TargetHost  string // Target host (e.g., tcp-target.autotunnel-test.svc.cluster.local)
-	TargetPort  int    // Target port
+	Context       string
+	Namespace     string
+	ViaService    string   // Jump pod discovered via service (mutually exclusive with ViaPod)
+	ViaPod        string   // Jump pod by direct name (mutually exclusive with ViaService)
+	Container     string   // Optional container name for multi-container pods
+	CreateImage   string   // Optional: auto-create pod with this image if it doesn't exist
+	CreateCommand []string // Optional: custom command for auto-created pod (default: ["sleep", "infinity"])
+	TargetHost    string   // Target host (e.g., tcp-target.autotunnel-test.svc.cluster.local)
+	TargetPort    int      // Target port
 }
 
 // writeTestConfigWithJump creates a test configuration file with HTTP, TCP, and jump routes
@@ -1724,6 +1725,12 @@ func writeTestConfigWithJump(t *testing.T, httpServices map[string]serviceConfig
 				if route.CreateImage != "" {
 					sb.WriteString("          create:\n")
 					sb.WriteString(fmt.Sprintf("            image: %s\n", route.CreateImage))
+					if len(route.CreateCommand) > 0 {
+						sb.WriteString("            command:\n")
+						for _, cmd := range route.CreateCommand {
+							sb.WriteString(fmt.Sprintf("              - %q\n", cmd))
+						}
+					}
 				}
 				sb.WriteString("        target:\n")
 				sb.WriteString(fmt.Sprintf("          host: %s\n", route.TargetHost))
@@ -2353,4 +2360,341 @@ func TestJumpAutoCreatePodAlreadyExists(t *testing.T) {
 	}
 
 	t.Logf("Successfully verified existing pod %s/%s was used (not recreated)", namespace, podName)
+}
+
+// TestJumpMultiContainerPod tests selecting a specific container in a multi-container pod
+func TestJumpMultiContainerPod(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
+		19300: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaPod:     "multi-container-bastion",
+			Container:  "socat", // Specify the socat container (not main)
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	conn, err := net.DialTimeout("tcp", "localhost:19300", testTimeout)
+	if err != nil {
+		t.Fatalf("Failed to connect to jump tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	testData := []byte("Multi-container pod test via socat container!\n")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+
+	t.Logf("Successfully connected via multi-container pod using specific container 'socat'")
+}
+
+// TestJumpAutoCreatePodCustomCommand tests auto-creating a jump pod with a custom command
+func TestJumpAutoCreatePodCustomCommand(t *testing.T) {
+	podName := "autotunnel-custom-cmd"
+	namespace := "autotunnel-test"
+
+	// Clean up any existing pod from previous test runs
+	cleanupPod := func() {
+		cmd := exec.Command("kubectl", "delete", "pod", podName,
+			"-n", namespace,
+			"--ignore-not-found=true",
+			"--wait=false")
+		_ = cmd.Run()
+		time.Sleep(2 * time.Second)
+	}
+
+	cleanupPod()
+	t.Cleanup(cleanupPod)
+
+	// Verify pod doesn't exist before test
+	checkCmd := exec.Command("kubectl", "get", "pod", podName, "-n", namespace)
+	if err := checkCmd.Run(); err == nil {
+		t.Fatalf("Pod %s/%s should not exist before test", namespace, podName)
+	}
+
+	// Create config with auto-create enabled and custom command
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
+		19301: {
+			Context:       getTestContext(),
+			Namespace:     namespace,
+			ViaPod:        podName,
+			CreateImage:   "alpine/socat:latest",
+			CreateCommand: []string{"tail", "-f", "/dev/null"}, // Custom command instead of default sleep
+			TargetHost:    "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort:    3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give autotunnel time to start
+	time.Sleep(3 * time.Second)
+
+	// Connect through the jump route - this should trigger pod creation
+	conn, err := net.DialTimeout("tcp", "localhost:19301", 90*time.Second)
+	if err != nil {
+		t.Fatalf("Failed to connect to jump tunnel (pod may not have been created): %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(60 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	// Test that connection works
+	testData := []byte("Custom command pod test!\n")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+
+	// Verify the pod was created with the custom command
+	verifyCmd := exec.Command("kubectl", "get", "pod", podName,
+		"-n", namespace,
+		"-o", "jsonpath={.spec.containers[0].command}")
+	output, err := verifyCmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to verify pod command: %v", err)
+	}
+
+	// The command should contain "tail" (our custom command)
+	if !strings.Contains(string(output), "tail") {
+		t.Errorf("Pod command = %q, expected to contain 'tail'", string(output))
+	}
+
+	t.Logf("Successfully verified auto-created pod %s/%s with custom command: %s", namespace, podName, string(output))
+}
+
+// TestJumpNetcatFallback tests that nc fallback works when socat is not available
+// Uses busybox which has nc but not socat
+func TestJumpNetcatFallback(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
+		19302: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaPod:     "nc-only-bastion", // Busybox pod with nc but no socat
+			TargetHost: "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	conn, err := net.DialTimeout("tcp", "localhost:19302", testTimeout)
+	if err != nil {
+		t.Fatalf("Failed to connect to jump tunnel (nc fallback may have failed): %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	testData := []byte("Netcat fallback test!\n")
+	if _, err := conn.Write(testData); err != nil {
+		t.Fatalf("Failed to write data: %v", err)
+	}
+
+	response := make([]byte, len(testData))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+
+	if string(response) != string(testData) {
+		t.Errorf("Response = %q, want %q", string(response), string(testData))
+	}
+
+	t.Logf("Successfully connected using nc fallback (socat not available in busybox)")
+}
+
+// TestJumpTargetUnreachable tests graceful error handling when target is unreachable
+func TestJumpTargetUnreachable(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
+		19303: {
+			Context:    getTestContext(),
+			Namespace:  "autotunnel-test",
+			ViaService: "bastion-jump",
+			TargetHost: "nonexistent.invalid.local", // This DNS lookup will fail
+			TargetPort: 3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give the service time to be fully ready
+	time.Sleep(2 * time.Second)
+
+	// Connection should be accepted but then fail when trying to reach target
+	conn, err := net.DialTimeout("tcp", "localhost:19303", testTimeout)
+	if err != nil {
+		// Connection may be rejected immediately - that's acceptable error handling
+		t.Logf("Connection rejected (acceptable): %v", err)
+		return
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	testData := []byte("This should fail!\n")
+	if _, err := conn.Write(testData); err != nil {
+		// Write failure is acceptable - connection failed
+		t.Logf("Write failed as expected: %v", err)
+		return
+	}
+
+	// Try to read - should either timeout, fail, or return EOF
+	response := make([]byte, len(testData))
+	_, err = io.ReadFull(conn, response)
+	if err != nil {
+		// Expected: read failure due to unreachable target
+		t.Logf("Read failed as expected (target unreachable): %v", err)
+		return
+	}
+
+	// If we somehow got data back, that's unexpected
+	t.Errorf("Unexpectedly received data from unreachable target: %q", string(response))
+}
+
+// TestJumpPodReadyTimeout tests error handling when auto-created pod never becomes ready
+// Uses an invalid image to ensure pod creation fails
+func TestJumpPodReadyTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping pod timeout test in short mode (takes ~60+ seconds)")
+	}
+
+	podName := "autotunnel-timeout-test"
+	namespace := "autotunnel-test"
+
+	// Clean up any existing pod from previous test runs
+	cleanupPod := func() {
+		cmd := exec.Command("kubectl", "delete", "pod", podName,
+			"-n", namespace,
+			"--ignore-not-found=true",
+			"--grace-period=0",
+			"--force")
+		_ = cmd.Run()
+		time.Sleep(2 * time.Second)
+	}
+
+	cleanupPod()
+	t.Cleanup(cleanupPod)
+
+	// Verify pod doesn't exist before test
+	checkCmd := exec.Command("kubectl", "get", "pod", podName, "-n", namespace)
+	if err := checkCmd.Run(); err == nil {
+		t.Fatalf("Pod %s/%s should not exist before test", namespace, podName)
+	}
+
+	// Create config with auto-create but invalid image that will never start
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
+		19304: {
+			Context:     getTestContext(),
+			Namespace:   namespace,
+			ViaPod:      podName,
+			CreateImage: "invalid-registry.example.com/nonexistent:v999", // Image that won't exist
+			TargetHost:  "tcp-target.autotunnel-test.svc.cluster.local",
+			TargetPort:  3306,
+		},
+	})
+
+	_, cleanup := startOPF(t, configPath)
+	defer cleanup()
+
+	// Give autotunnel time to start
+	time.Sleep(3 * time.Second)
+
+	// TCP connection will be accepted by the listener, but the actual jump
+	// connection should fail when trying to use it (after pod ready timeout).
+	// We use a longer timeout to allow for the ~60s pod ready timeout.
+	startTime := time.Now()
+	conn, err := net.DialTimeout("tcp", "localhost:19304", 90*time.Second)
+	if err != nil {
+		// Connection may be rejected immediately - that's acceptable error handling
+		elapsed := time.Since(startTime)
+		t.Logf("Connection rejected (acceptable): %v after %v", err, elapsed)
+		return
+	}
+	defer conn.Close()
+
+	// Set a deadline that accounts for the pod ready timeout (~60s) plus some buffer
+	if err := conn.SetDeadline(time.Now().Add(90 * time.Second)); err != nil {
+		t.Fatalf("Failed to set deadline: %v", err)
+	}
+
+	// Try to write data - this will trigger the jump handler which will
+	// attempt to create the pod and wait for it to become ready
+	testData := []byte("This should fail due to pod not being ready!\n")
+	if _, err := conn.Write(testData); err != nil {
+		elapsed := time.Since(startTime)
+		t.Logf("Write failed as expected after %v: %v", elapsed, err)
+		verifyPodState(t, podName, namespace)
+		return
+	}
+
+	// Try to read - should fail due to connection being closed after pod ready timeout
+	response := make([]byte, len(testData))
+	_, err = io.ReadFull(conn, response)
+	elapsed := time.Since(startTime)
+
+	if err != nil {
+		// Expected: read failure due to pod creation timeout
+		t.Logf("Read failed as expected after %v: %v", elapsed, err)
+
+		// Verify the failure took approximately the expected time (~60s for pod ready timeout)
+		if elapsed < 30*time.Second {
+			t.Logf("Note: Connection failed faster than expected pod ready timeout (this is acceptable)")
+		}
+	} else {
+		t.Errorf("Unexpectedly received data from unreachable pod: %q", string(response))
+	}
+
+	verifyPodState(t, podName, namespace)
+}
+
+// verifyPodState checks and logs the state of the test pod
+func verifyPodState(t *testing.T, podName, namespace string) {
+	t.Helper()
+	checkPodCmd := exec.Command("kubectl", "get", "pod", podName, "-n", namespace, "-o", "jsonpath={.status.phase}")
+	output, checkErr := checkPodCmd.Output()
+	if checkErr == nil {
+		t.Logf("Pod exists in state: %s (will be cleaned up)", string(output))
+	} else {
+		t.Logf("Pod may not have been created or was already cleaned up")
+	}
 }
