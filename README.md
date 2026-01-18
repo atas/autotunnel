@@ -438,6 +438,10 @@ For custom hostnames, add entries to `/etc/hosts`:
 127.0.0.1  api.local
 ```
 
+## Security Note
+
+autotunnel uses standard Kubernetes port-forwarding. Access is governed by your kubeconfig credentials and RBAC policies. Use appropriate caution when connecting to production environments.
+
 ## Development
 
 ### Building
