@@ -93,13 +93,9 @@ func (m *Manager) cleanupIdleTCPTunnels() {
 	for port, tunnel := range m.tcpTunnels {
 		if tunnel.IsRunning() && tunnel.IdleDuration() > tcpIdleTimeout {
 			target := m.config.TCP.K8s.Routes[port]
-			targetName := target.Service
-			if target.Pod != "" {
-				targetName = target.Pod
-			}
 			idleDur := tunnel.IdleDuration().Round(time.Second)
 			log.Printf("Tunnel stopped: tcp://localhost:%d -> %s/%s (idle for %v)",
-				port, target.Namespace, targetName, idleDur)
+				port, target.Namespace, target.TargetName(), idleDur)
 			tunnel.Stop()
 			delete(m.tcpTunnels, port)
 		}

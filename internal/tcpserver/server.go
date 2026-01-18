@@ -3,13 +3,13 @@ package tcpserver
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/netutil"
 )
 
 type listenerType int
@@ -94,18 +94,10 @@ func (s *Server) startListener(port int, lt listenerType) error {
 	if lt == listenerTypeJump {
 		jumpCfg := s.config.TCP.K8s.Jump[port]
 		destStr = fmt.Sprintf("-> %s:%d via %s/%s (jump)",
-			jumpCfg.Target.Host, jumpCfg.Target.Port, jumpCfg.Namespace, jumpCfg.Via.Pod)
-		if jumpCfg.Via.Service != "" {
-			destStr = fmt.Sprintf("-> %s:%d via %s/svc/%s (jump)",
-				jumpCfg.Target.Host, jumpCfg.Target.Port, jumpCfg.Namespace, jumpCfg.Via.Service)
-		}
+			jumpCfg.Target.Host, jumpCfg.Target.Port, jumpCfg.Namespace, jumpCfg.Via.TargetDisplay())
 	} else {
 		routeCfg := s.config.TCP.K8s.Routes[port]
-		if routeCfg.Service != "" {
-			destStr = fmt.Sprintf("-> %s/svc/%s:%d", routeCfg.Namespace, routeCfg.Service, routeCfg.Port)
-		} else {
-			destStr = fmt.Sprintf("-> %s/%s:%d", routeCfg.Namespace, routeCfg.Pod, routeCfg.Port)
-		}
+		destStr = fmt.Sprintf("-> %s/%s:%d", routeCfg.Namespace, routeCfg.TargetDisplay(), routeCfg.Port)
 	}
 	log.Printf("TCP listener started on %s %s", addr, destStr)
 	return nil
@@ -174,26 +166,7 @@ func (s *Server) handleConnection(localPort int, conn net.Conn) {
 		log.Printf("[tcp:%d] Connection established -> backend port %d", localPort, tunnel.LocalPort())
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		_, _ = io.Copy(backend, conn)
-		if tc, ok := backend.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		_, _ = io.Copy(conn, backend)
-		if tc, ok := conn.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
-	}()
-
-	wg.Wait()
+	netutil.BidirectionalCopy(backend, conn)
 
 	if s.verbose {
 		log.Printf("[tcp:%d] Connection closed", localPort)

@@ -148,7 +148,7 @@ func TestGetOrCreateTCPTunnel_FallsBackToHTTPKubeconfig(t *testing.T) {
 	}
 }
 
-func TestTcpTarget(t *testing.T) {
+func TestTCPRouteConfig_TargetName(t *testing.T) {
 	tests := []struct {
 		name     string
 		route    config.TCPRouteConfig
@@ -178,9 +178,9 @@ func TestTcpTarget(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tcpTarget(tt.route)
+			result := tt.route.TargetName()
 			if result != tt.expected {
-				t.Errorf("tcpTarget() = %q, want %q", result, tt.expected)
+				t.Errorf("TargetName() = %q, want %q", result, tt.expected)
 			}
 		})
 	}

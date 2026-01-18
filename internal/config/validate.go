@@ -52,6 +52,41 @@ func IsValidImageName(image string) bool {
 	return imageNameRegex.MatchString(image)
 }
 
+// validateLocalPort validates TCP local port: range, HTTP conflict, and duplicates
+func validateLocalPort(routeID string, localPort, httpPort int, seenPorts map[int]string, source string) error {
+	if localPort <= 0 || localPort > 65535 {
+		return fmt.Errorf("%s: local port must be between 1 and 65535", routeID)
+	}
+	if localPort == httpPort {
+		return fmt.Errorf("%s: conflicts with http.listen port", routeID)
+	}
+	if existing, exists := seenPorts[localPort]; exists {
+		return fmt.Errorf("%s: port already used in tcp.k8s.%s", routeID, existing)
+	}
+	seenPorts[localPort] = source
+	return nil
+}
+
+// validateRouteBase validates the common fields shared by HTTP and TCP routes
+func validateRouteBase(routeID, context, namespace, service, pod string, port int) error {
+	if context == "" {
+		return fmt.Errorf("%s: context is required", routeID)
+	}
+	if namespace == "" {
+		return fmt.Errorf("%s: namespace is required", routeID)
+	}
+	if service == "" && pod == "" {
+		return fmt.Errorf("%s: either service or pod is required", routeID)
+	}
+	if service != "" && pod != "" {
+		return fmt.Errorf("%s: cannot specify both service and pod", routeID)
+	}
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("%s: port must be between 1 and 65535", routeID)
+	}
+	return nil
+}
+
 func (c *Config) Validate() error {
 	// Allow empty apiVersion (defaults to current), but reject wrong versions
 	if c.ApiVersion != "" && c.ApiVersion != CurrentApiVersion {
@@ -67,21 +102,9 @@ func (c *Config) Validate() error {
 	}
 
 	for hostname, route := range c.HTTP.K8s.Routes {
-		if route.Context == "" {
-			return fmt.Errorf("route %q: context is required", hostname)
-		}
-		if route.Namespace == "" {
-			return fmt.Errorf("route %q: namespace is required", hostname)
-		}
-		// Require exactly one of service or pod
-		if route.Service == "" && route.Pod == "" {
-			return fmt.Errorf("route %q: either service or pod is required", hostname)
-		}
-		if route.Service != "" && route.Pod != "" {
-			return fmt.Errorf("route %q: cannot specify both service and pod", hostname)
-		}
-		if route.Port <= 0 || route.Port > 65535 {
-			return fmt.Errorf("route %q: port must be between 1 and 65535", hostname)
+		routeID := fmt.Sprintf("route %q", hostname)
+		if err := validateRouteBase(routeID, route.Context, route.Namespace, route.Service, route.Pod, route.Port); err != nil {
+			return err
 		}
 	}
 
@@ -119,42 +142,11 @@ func (c *Config) validateTCP() error {
 	for localPort, route := range c.TCP.K8s.Routes {
 		routeID := fmt.Sprintf("tcp.k8s.routes[%d]", localPort)
 
-		// Validate local port range
-		if localPort <= 0 || localPort > 65535 {
-			return fmt.Errorf("%s: local port must be between 1 and 65535", routeID)
+		if err := validateLocalPort(routeID, localPort, httpPort, seenPorts, "routes"); err != nil {
+			return err
 		}
-
-		if localPort == httpPort {
-			return fmt.Errorf("%s: conflicts with http.listen port", routeID)
-		}
-
-		// Check for duplicate TCP ports
-		if source, exists := seenPorts[localPort]; exists {
-			return fmt.Errorf("%s: port already used in tcp.k8s.%s", routeID, source)
-		}
-		seenPorts[localPort] = "routes"
-
-		// Validate context
-		if route.Context == "" {
-			return fmt.Errorf("%s: context is required", routeID)
-		}
-
-		// Validate namespace
-		if route.Namespace == "" {
-			return fmt.Errorf("%s: namespace is required", routeID)
-		}
-
-		// Require exactly one of service or pod
-		if route.Service == "" && route.Pod == "" {
-			return fmt.Errorf("%s: either service or pod is required", routeID)
-		}
-		if route.Service != "" && route.Pod != "" {
-			return fmt.Errorf("%s: cannot specify both service and pod", routeID)
-		}
-
-		// Validate target port
-		if route.Port <= 0 || route.Port > 65535 {
-			return fmt.Errorf("%s: target port must be between 1 and 65535", routeID)
+		if err := validateRouteBase(routeID, route.Context, route.Namespace, route.Service, route.Pod, route.Port); err != nil {
+			return err
 		}
 	}
 
@@ -162,27 +154,13 @@ func (c *Config) validateTCP() error {
 	for localPort, route := range c.TCP.K8s.Jump {
 		routeID := fmt.Sprintf("tcp.k8s.jump[%d]", localPort)
 
-		// Validate local port range
-		if localPort <= 0 || localPort > 65535 {
-			return fmt.Errorf("%s: local port must be between 1 and 65535", routeID)
+		if err := validateLocalPort(routeID, localPort, httpPort, seenPorts, "jump"); err != nil {
+			return err
 		}
 
-		if localPort == httpPort {
-			return fmt.Errorf("%s: conflicts with http.listen port", routeID)
-		}
-
-		// Check for duplicate TCP ports (collision with routes or other jump)
-		if source, exists := seenPorts[localPort]; exists {
-			return fmt.Errorf("%s: port already used in tcp.k8s.%s", routeID, source)
-		}
-		seenPorts[localPort] = "jump"
-
-		// Validate context
 		if route.Context == "" {
 			return fmt.Errorf("%s: context is required", routeID)
 		}
-
-		// Validate namespace
 		if route.Namespace == "" {
 			return fmt.Errorf("%s: namespace is required", routeID)
 		}

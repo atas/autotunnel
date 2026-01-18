@@ -3,11 +3,11 @@ package httpserver
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"sync"
 	"time"
+
+	"github.com/atas/autotunnel/internal/netutil"
 )
 
 func (s *Server) handleTLSConnection(conn *peekConn) {
@@ -75,96 +75,101 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		return
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		_, _ = io.Copy(backendConn, conn.Conn)
-		if tc, ok := backendConn.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		_, _ = io.Copy(conn.Conn, backendConn)
-		if tc, ok := conn.Conn.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
-	}()
-
-	wg.Wait()
+	netutil.BidirectionalCopy(backendConn, conn.Conn)
 }
 
 // extractSNI parses the TLS ClientHello to find the Server Name Indication.
 // This is how we know which backend to route to before TLS terminates.
 func extractSNI(data []byte) (string, error) {
+	handshake, err := validateTLSHandshake(data)
+	if err != nil {
+		return "", err
+	}
+
+	extStart, extLen, err := skipToExtensions(handshake)
+	if err != nil {
+		return "", err
+	}
+
+	return findSNIInExtensions(handshake[extStart:], extLen)
+}
+
+// validateTLSHandshake validates TLS record and ClientHello headers, returning handshake data
+func validateTLSHandshake(data []byte) ([]byte, error) {
 	// TLS record: type(1) + version(2) + length(2) = 5 bytes minimum
 	if len(data) < 5 {
-		return "", fmt.Errorf("data too short for TLS record")
+		return nil, fmt.Errorf("data too short for TLS record")
 	}
 
 	// Check if it's a TLS handshake (0x16)
 	if data[0] != 0x16 {
-		return "", fmt.Errorf("not a TLS handshake record")
+		return nil, fmt.Errorf("not a TLS handshake record")
 	}
 
 	recordLen := int(data[3])<<8 | int(data[4])
 	if len(data) < 5+recordLen {
-		return "", fmt.Errorf("incomplete TLS record")
+		return nil, fmt.Errorf("incomplete TLS record")
 	}
 
 	handshake := data[5:]
 	if len(handshake) < 4 {
-		return "", fmt.Errorf("data too short for handshake header")
+		return nil, fmt.Errorf("data too short for handshake header")
 	}
 
 	// Check if it's a ClientHello (0x01)
 	if handshake[0] != 0x01 {
-		return "", fmt.Errorf("not a ClientHello")
+		return nil, fmt.Errorf("not a ClientHello")
 	}
 
+	return handshake, nil
+}
+
+// skipToExtensions skips the variable-length fields in ClientHello to find extensions
+// Returns the offset to extensions start and total extensions length
+func skipToExtensions(handshake []byte) (int, int, error) {
 	// skip: handshake header(4) + version(2) + random(32) = 38 bytes
 	pos := 38
 	if len(handshake) < pos+1 {
-		return "", fmt.Errorf("data too short for session ID length")
+		return 0, 0, fmt.Errorf("data too short for session ID length")
 	}
 
 	sessionIDLen := int(handshake[pos])
 	pos += 1 + sessionIDLen
 	if len(handshake) < pos+2 {
-		return "", fmt.Errorf("data too short for cipher suites length")
+		return 0, 0, fmt.Errorf("data too short for cipher suites length")
 	}
 
 	cipherSuitesLen := int(handshake[pos])<<8 | int(handshake[pos+1])
 	pos += 2 + cipherSuitesLen
 	if len(handshake) < pos+1 {
-		return "", fmt.Errorf("data too short for compression methods length")
+		return 0, 0, fmt.Errorf("data too short for compression methods length")
 	}
 
 	compressionLen := int(handshake[pos])
 	pos += 1 + compressionLen
 	if len(handshake) < pos+2 {
-		return "", fmt.Errorf("no extensions present")
+		return 0, 0, fmt.Errorf("no extensions present")
 	}
 
 	extensionsLen := int(handshake[pos])<<8 | int(handshake[pos+1])
-	pos += 2
-	extensionsEnd := pos + extensionsLen
+	return pos + 2, extensionsLen, nil
+}
 
-	for pos+4 <= extensionsEnd && pos+4 <= len(handshake) {
-		extType := int(handshake[pos])<<8 | int(handshake[pos+1])
-		extLen := int(handshake[pos+2])<<8 | int(handshake[pos+3])
+// findSNIInExtensions scans TLS extensions to find and parse the SNI extension
+func findSNIInExtensions(extensions []byte, extLen int) (string, error) {
+	pos := 0
+	for pos+4 <= extLen && pos+4 <= len(extensions) {
+		extType := int(extensions[pos])<<8 | int(extensions[pos+1])
+		thisExtLen := int(extensions[pos+2])<<8 | int(extensions[pos+3])
 		pos += 4
 
-		if pos+extLen > len(handshake) {
+		if pos+thisExtLen > len(extensions) {
 			break
 		}
 
 		// SNI is extension type 0x0000
 		if extType == 0 {
-			extData := handshake[pos : pos+extLen]
+			extData := extensions[pos : pos+thisExtLen]
 			if len(extData) < 5 {
 				return "", fmt.Errorf("SNI extension too short")
 			}
@@ -176,7 +181,7 @@ func extractSNI(data []byte) (string, error) {
 			return string(extData[5 : 5+nameLen]), nil
 		}
 
-		pos += extLen
+		pos += thisExtLen
 	}
 
 	return "", fmt.Errorf("SNI extension not found")
