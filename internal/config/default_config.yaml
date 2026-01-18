@@ -12,126 +12,125 @@ auto_reload_config: true
 #   - /custom/path/to/binaries
 
 http:
-   # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
-   listen: "127.0.0.1:8989" # Port changes require: brew services restart autotunnel
+  # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
+  listen: "127.0.0.1:8989" # Port changes require: brew services restart autotunnel
 
-   # Idle timeout before closing tunnels (Go duration format)
-   # After this duration of no traffic, the tunnel will be closed
-   idle_timeout: 60m
+  # Idle timeout before closing tunnels (Go duration format)
+  # After this duration of no traffic, the tunnel will be closed
+  idle_timeout: 60m
 
-   k8s:
-      # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
-      # Tries to use $KUBECONFIG env var as well but that's not available in the service
-      # then defaults to ~/.kube/config
-      # kubeconfig: ~/.kube/config:~/.kube/prod-config
+  k8s:
+    # Path(s) to kubeconfig. Supports colon-separated paths like $KUBECONFIG.
+    # Tries to use $KUBECONFIG env var as well but that's not available in the service
+    # then defaults to ~/.kube/config
+    # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
-      # Dynamic routing: access any K8s service or pod without pre-configuring routes
-      # IMPORTANT: *.localhost domains don't resolve to 127.0.0.1 on all systems.
-      #            You can use local.gd, sslip.io, lvh.me, etc. if you TRUST them.
-      # Formats:
-      #   Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamic_host}
-      #   Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamic_host}
-      # Examples:
-      #   http://nginx-80.svc.default.ns.my-cluster-context.cx.k8s.localhost:8989
-      #   https://argocd-server-443.svc.argocd.ns.my-cluster-context.cx.k8s.localhost:8989
-      #   http://nginx-2fxac-80.pod.default.ns.my-cluster-context.cx.k8s.localhost:8989
-      dynamic_host: k8s.localhost
+    # Dynamic routing: access any K8s service or pod without pre-configuring routes
+    # IMPORTANT: *.localhost domains don't resolve to 127.0.0.1 on all systems.
+    #            You can use local.gd, sslip.io, lvh.me, etc. if you TRUST them.
+    # Formats:
+    #   Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamic_host}
+    #   Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamic_host}
+    # Examples:
+    #   http://nginx-80.svc.default.ns.my-cluster-context.cx.k8s.localhost:8989
+    #   https://argocd-server-443.svc.argocd.ns.my-cluster-context.cx.k8s.localhost:8989
+    #   http://nginx-2fxac-80.pod.default.ns.my-cluster-context.cx.k8s.localhost:8989
+    dynamic_host: k8s.localhost
 
-      routes:
-         # Static routes (take priority over dynamic routing)
+    routes:
+      # Static routes (take priority over dynamic routing)
 
-         # # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)
-         # argocd.localhost:
-         #   context: my-cluster-context # Kubernetes context name from kubeconfig
-         #   namespace: argocd           # Kubernetes namespace
-         #   service: argocd-server      # Kubernetes service name
-         #   port: 443                   # Service port (automatically resolves to container targetPort)
-         #   scheme: https               # Optional. Default is http.
-                                         # You can access remote https via local http too, not the other way around.
+      # # https://argocd.localhost:8989 (also supports http http://argocd.localhost:8989)
+      # argocd.localhost:
+      #   context: my-cluster-context # Kubernetes context name from kubeconfig
+      #   namespace: argocd           # Kubernetes namespace
+      #   service: argocd-server      # Kubernetes service name
+      #   port: 443                   # Service port (automatically resolves to container targetPort)
+      #   scheme: https               # Optional. Default is http.
+      # You can access remote https via local http too, not the other way around.
 
+      # # http://grafana.localhost:8989
+      # grafana.localhost:
+      #   context: my-cluster-context
+      #   namespace: monitoring
+      #   service: grafana
+      #   port: 3000
+      #   scheme: http               # Default is "http", no need to specify
 
-         # # http://grafana.localhost:8989
-         # grafana.localhost:
-         #   context: my-cluster-context
-         #   namespace: monitoring
-         #   service: grafana
-         #   port: 3000
-         #   scheme: http               # Default is "http", no need to specify
-
-         # http://debug.localhost:8989
-         # debug.localhost:
-         #   context: microk8s
-         #   namespace: default
-         #   pod: my-debug-pod         # Pod name (use instead of service)
-         #   port: 8080
+      # http://debug.localhost:8989
+      # debug.localhost:
+      #   context: microk8s
+      #   namespace: default
+      #   pod: my-debug-pod         # Pod name (use instead of service)
+      #   port: 8080
 
 # TCP tunneling for non-HTTP protocols (databases, caches, etc.)
 # Each route listens on a local port and forwards to a K8s service/pod
 tcp:
-#    # Idle timeout before closing tunnels (Go duration format)
-#    idle_timeout: 60m
-#
-    k8s:
-#       # Path(s) to kubeconfig (same format as http.k8s.kubeconfig)
-#       # kubeconfig: ~/.kube/config
-#
-#       # Direct port-forward routes (native K8s port-forward)
-       routes:
-#          # # PostgreSQL: connect via localhost:5432
-#          # 5432: # local port
-#          #   context: my-cluster-context
-#          #   namespace: databases
-#          #   service: postgresql
-#          #   port: 5432
-#
-#          # # Redis: connect via localhost:6379
-#          # 6379: # local port
-#          #   context: my-cluster-context
-#          #   namespace: caching
-#          #   service: redis-master
-#          #   port: 6379
-#
-#          # # MySQL: connect via localhost:3306
-#          # 3306: # local port
-#          #   context: my-cluster-context
-#          #   namespace: databases
-#          #   service: mysql
-#          #   port: 3306
-#
-#          # # Direct pod targeting (no service discovery)
-#          # 27017:
-#          #   context: my-cluster-context
-#          #   namespace: databases
-#          #   pod: mongodb-0           # Pod name (use instead of service)
-#          #   port: 27017
-#
-#       # Jump-host routes via kubectl exec + socat/nc
-#       # Use this to connect to VPC-internal services (RDS, Cloud SQL, etc.)
-#       # through a jump pod that has network access to those services.
-#       # Requires socat or nc (netcat) installed in the jump pod.
-       jump:
-#          # # AWS RDS MySQL: connect via localhost:3306 -> jump pod -> RDS
-#          # 3306: # local port
-#          #   context: eks-prod
-#          #   namespace: default
-#          #   via:
-#          #     service: backend-api   # Discover pod from service selector
-#          #     # OR use direct pod:
-#          #     # pod: bastion-pod
-#          #     # container: main      # Optional: specify container in multi-container pods
-#          #   target:
-#          #     host: mydb.cluster-xyz.us-east-1.rds.amazonaws.com
-#          #     port: 3306
-#          #   method: socat            # Optional: "socat" is the default (uses socat/nc fallback)
-#          #
-#          # # Auto-create a jump pod if it doesn't exist:
-#          # 5432: # local port
-#          #   context: eks-prod
-#          #   namespace: default
-#          #   via:
-#          #     pod: autotunnel-jump
-#          #     create:
-#          #       image: alpine/socat:latest   # Image must have socat or nc
-#          #   target:
-#          #     host: postgres.internal
-#          #     port: 5432
+  # Idle timeout before closing tunnels (Go duration format)
+  idle_timeout: 60m
+
+  k8s:
+    # Path(s) to kubeconfig (same format as http.k8s.kubeconfig)
+    # kubeconfig: ~/.kube/config
+
+    # Direct port-forward routes (native K8s port-forward)
+    routes:
+      # # PostgreSQL: connect via localhost:5432
+      # 5432: # local port
+      #   context: my-cluster-context
+      #   namespace: databases
+      #   service: postgresql
+      #   port: 5432
+
+      # # Redis: connect via localhost:6379
+      # 6379: # local port
+      #   context: my-cluster-context
+      #   namespace: caching
+      #   service: redis-master
+      #   port: 6379
+
+      # # MySQL: connect via localhost:3306
+      # 3306: # local port
+      #   context: my-cluster-context
+      #   namespace: databases
+      #   service: mysql
+      #   port: 3306
+
+      # # Direct pod targeting (no service discovery)
+      # 27017: # local port
+      #   context: my-cluster-context
+      #   namespace: databases
+      #   pod: mongodb-0           # Pod name (use instead of service)
+      #   port: 27017
+
+    # Jump-host routes via kubectl exec + socat/nc
+    # Use this to connect to VPC-internal services (RDS, Cloud SQL, etc.)
+    # through a jump pod that has network access to those services.
+    # Requires socat or nc (netcat) installed in the jump pod.
+    jump:
+      # # AWS RDS MySQL: connect via localhost:3306 -> jump pod -> RDS
+      # 3306: # local port
+      #   context: eks-prod
+      #   namespace: default
+      #   via:
+      #     service: backend-api   # Discover pod from service selector
+      #     # OR use direct pod:
+      #     # pod: bastion-pod
+      #     # container: main      # Optional: specify container in multi-container pods
+      #   target:
+      #     host: mydb.cluster-xyz.us-east-1.rds.amazonaws.com
+      #     port: 3306
+      #   method: socat            # Optional: "socat" is the default (uses socat/nc fallback)
+
+      # # Auto-create a jump pod if it doesn't exist:
+      # 5432: # local port
+      #   context: eks-prod
+      #   namespace: default
+      #   via:
+      #     pod: autotunnel-jump
+      #     create:
+      #       image: alpine/socat:latest   # Image must have socat or nc
+      #   target:
+      #     host: postgres.internal
+      #     port: 5432

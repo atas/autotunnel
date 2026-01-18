@@ -334,9 +334,45 @@ func TestJumpHandler_buildForwardCommand(t *testing.T) {
 			}
 
 			// Command should contain both socat and nc fallback
-			expectedCmd := tt.wantSocat + " 2>/dev/null || " + tt.wantNc
+			// (stderr captured for error logging, not suppressed)
+			expectedCmd := tt.wantSocat + " || " + tt.wantNc
 			if cmd != expectedCmd {
 				t.Errorf("buildForwardCommand() = %q, want %q", cmd, expectedCmd)
+			}
+		})
+	}
+}
+
+func TestIsConnectionError(t *testing.T) {
+	tests := []struct {
+		msg      string
+		expected bool
+	}{
+		// Should match
+		{"Connection refused", true},
+		{"connection refused", true},
+		{"ECONNREFUSED: Connection refused", true},
+		{"Connection timed out", true},
+		{"No route to host", true},
+		{"Network is unreachable", true},
+		{"Host is unreachable", true},
+		{"Name or service not known", true},
+		{"Temporary failure in name resolution", true},
+		{"Connection reset by peer", true},
+		{"Broken pipe", true},
+
+		// Should not match
+		{"Connected successfully", false},
+		{"Data transferred", false},
+		{"", false},
+		{"socat version 1.7.4", false},
+		{"Normal stderr output", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.msg, func(t *testing.T) {
+			if got := isConnectionError(tt.msg); got != tt.expected {
+				t.Errorf("isConnectionError(%q) = %v, want %v", tt.msg, got, tt.expected)
 			}
 		})
 	}

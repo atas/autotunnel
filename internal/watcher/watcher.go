@@ -138,4 +138,5 @@ func (cw *ConfigWatcher) reloadConfig() {
 	log.Println("Config reloaded successfully")
 	newConfig.PrintRoutes()
 	newConfig.PrintTCPRoutes()
+	newConfig.PrintJumpRoutes()
 }

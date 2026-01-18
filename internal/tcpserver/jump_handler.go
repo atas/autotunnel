@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,8 +102,14 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 		buf := make([]byte, 4096)
 		for {
 			n, err := stderrReader.Read(buf)
-			if n > 0 && h.verbose {
-				log.Printf("[jump:%d] stderr: %s", localPort, string(buf[:n]))
+			if n > 0 {
+				stderrMsg := strings.TrimSpace(string(buf[:n]))
+				// Log connection errors non-verbose (these are important)
+				if isConnectionError(stderrMsg) {
+					log.Printf("[jump:%d] Connection error: %s", localPort, stderrMsg)
+				} else if h.verbose {
+					log.Printf("[jump:%d] stderr: %s", localPort, stderrMsg)
+				}
 			}
 			if err != nil {
 				return
@@ -115,6 +122,10 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 
 	connWrapper := &connReadWriter{conn: conn, ctx: execCtx, cancel: cancel}
 
+	// Log successful tunnel start (non-verbose, matches TCP tunnel behavior)
+	log.Printf("Jump tunnel started: :%d via %s/%s -> %s:%d",
+		localPort, h.route.Namespace, podName, h.route.Target.Host, h.route.Target.Port)
+
 	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
 		Stdin:  connWrapper,
 		Stdout: conn,
@@ -126,13 +137,12 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 	if err != nil {
 		// context cancellation is normal shutdown, not an error
 		if execCtx.Err() == nil {
+			log.Printf("[jump:%d] Stream failed: %v", localPort, err)
 			return fmt.Errorf("exec stream failed: %w", err)
 		}
 	}
 
-	if h.verbose {
-		log.Printf("[jump:%d] Connection closed", localPort)
-	}
+	log.Printf("[jump:%d] Connection closed", localPort)
 
 	return nil
 }
@@ -228,7 +238,8 @@ func (h *JumpHandler) buildForwardCommand() (string, error) {
 	}
 
 	// try socat first (handles binary better), fall back to nc
-	return fmt.Sprintf("socat - TCP:%s:%d 2>/dev/null || nc %s %d", host, port, host, port), nil
+	// stderr is captured for error logging (connection refused, etc.)
+	return fmt.Sprintf("socat - TCP:%s:%d || nc %s %d", host, port, host, port), nil
 }
 
 // ensureJumpPodExists checks if the jump pod exists, and creates it if via.create is configured
@@ -321,6 +332,28 @@ func (h *JumpHandler) buildJumpPodSpec() *corev1.Pod {
 			RestartPolicy: corev1.RestartPolicyAlways,
 		},
 	}
+}
+
+// isConnectionError checks if stderr output indicates a connection error
+func isConnectionError(msg string) bool {
+	msg = strings.ToLower(msg)
+	errorPatterns := []string{
+		"connection refused",
+		"connection timed out",
+		"no route to host",
+		"network is unreachable",
+		"host is unreachable",
+		"name or service not known",
+		"temporary failure in name resolution",
+		"connection reset",
+		"broken pipe",
+	}
+	for _, pattern := range errorPatterns {
+		if strings.Contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // waitForPodReady polls until the pod is ready or timeout is reached
