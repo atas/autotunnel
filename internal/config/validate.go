@@ -75,9 +75,9 @@ func (c *Config) Validate() error {
 
 func (c *Config) validateTCP() error {
 	hasRoutes := len(c.TCP.K8s.Routes) > 0
-	hasSocat := len(c.TCP.K8s.Socat) > 0
+	hasJump := len(c.TCP.K8s.Jump) > 0
 
-	if !hasRoutes && !hasSocat {
+	if !hasRoutes && !hasJump {
 		return nil
 	}
 
@@ -92,8 +92,8 @@ func (c *Config) validateTCP() error {
 		return fmt.Errorf("invalid http.listen address: %w", err)
 	}
 
-	// Track all seen TCP ports (both routes and socat)
-	seenPorts := make(map[int]string) // port -> source ("routes" or "socat")
+	// Track all seen TCP ports (both routes and jump)
+	seenPorts := make(map[int]string) // port -> source ("routes" or "jump")
 
 	// Validate direct port-forward routes
 	for localPort, route := range c.TCP.K8s.Routes {
@@ -138,9 +138,9 @@ func (c *Config) validateTCP() error {
 		}
 	}
 
-	// Validate socat (jump-host) routes
-	for localPort, route := range c.TCP.K8s.Socat {
-		routeID := fmt.Sprintf("tcp.k8s.socat[%d]", localPort)
+	// Validate jump (jump-host) routes
+	for localPort, route := range c.TCP.K8s.Jump {
+		routeID := fmt.Sprintf("tcp.k8s.jump[%d]", localPort)
 
 		// Validate local port range
 		if localPort <= 0 || localPort > 65535 {
@@ -151,11 +151,11 @@ func (c *Config) validateTCP() error {
 			return fmt.Errorf("%s: conflicts with http.listen port", routeID)
 		}
 
-		// Check for duplicate TCP ports (collision with routes or other socat)
+		// Check for duplicate TCP ports (collision with routes or other jump)
 		if source, exists := seenPorts[localPort]; exists {
 			return fmt.Errorf("%s: port already used in tcp.k8s.%s", routeID, source)
 		}
-		seenPorts[localPort] = "socat"
+		seenPorts[localPort] = "jump"
 
 		// Validate context
 		if route.Context == "" {
@@ -186,6 +186,11 @@ func (c *Config) validateTCP() error {
 		// Validate target port
 		if route.Target.Port <= 0 || route.Target.Port > 65535 {
 			return fmt.Errorf("%s: target.port must be between 1 and 65535", routeID)
+		}
+
+		// Validate method (allow empty or "socat" for now)
+		if route.Method != "" && route.Method != "socat" {
+			return fmt.Errorf("%s: unsupported method %q (only \"socat\" is currently supported)", routeID, route.Method)
 		}
 	}
 

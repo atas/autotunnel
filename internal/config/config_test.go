@@ -837,8 +837,8 @@ func TestCreateDefaultConfig(t *testing.T) {
 }
 
 
-// TestValidate_SocatRoute tests validation of socat routes
-func TestValidate_SocatRoute(t *testing.T) {
+// TestValidate_JumpRoute tests validation of jump routes
+func TestValidate_JumpRoute(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
 		HTTP: HTTPConfig{
@@ -848,7 +848,7 @@ func TestValidate_SocatRoute(t *testing.T) {
 		TCP: TCPConfig{
 			IdleTimeout: 60 * time.Minute,
 			K8s: TCPK8sConfig{
-				Socat: map[int]SocatRouteConfig{
+				Jump: map[int]JumpRouteConfig{
 					3306: {
 						Context:   "test-context",
 						Namespace: "default",
@@ -867,12 +867,12 @@ func TestValidate_SocatRoute(t *testing.T) {
 
 	err := cfg.Validate()
 	if err != nil {
-		t.Errorf("unexpected error for valid socat route: %v", err)
+		t.Errorf("unexpected error for valid jump route: %v", err)
 	}
 }
 
-// TestValidate_SocatRouteMissingVia tests that socat routes require via config
-func TestValidate_SocatRouteMissingVia(t *testing.T) {
+// TestValidate_JumpRouteMissingVia tests that jump routes require via config
+func TestValidate_JumpRouteMissingVia(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
 		HTTP: HTTPConfig{
@@ -881,7 +881,7 @@ func TestValidate_SocatRouteMissingVia(t *testing.T) {
 		},
 		TCP: TCPConfig{
 			K8s: TCPK8sConfig{
-				Socat: map[int]SocatRouteConfig{
+				Jump: map[int]JumpRouteConfig{
 					3306: {
 						Context:   "test-context",
 						Namespace: "default",
@@ -898,15 +898,15 @@ func TestValidate_SocatRouteMissingVia(t *testing.T) {
 
 	err := cfg.Validate()
 	if err == nil {
-		t.Error("expected error for socat route without via config")
+		t.Error("expected error for jump route without via config")
 	}
 	if !strings.Contains(err.Error(), "via.pod or via.service is required") {
 		t.Errorf("expected error about missing via, got: %v", err)
 	}
 }
 
-// TestValidate_SocatRouteBothPodAndService tests that pod and service are mutually exclusive
-func TestValidate_SocatRouteBothPodAndService(t *testing.T) {
+// TestValidate_JumpRouteBothPodAndService tests that pod and service are mutually exclusive
+func TestValidate_JumpRouteBothPodAndService(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
 		HTTP: HTTPConfig{
@@ -915,7 +915,7 @@ func TestValidate_SocatRouteBothPodAndService(t *testing.T) {
 		},
 		TCP: TCPConfig{
 			K8s: TCPK8sConfig{
-				Socat: map[int]SocatRouteConfig{
+				Jump: map[int]JumpRouteConfig{
 					3306: {
 						Context:   "test-context",
 						Namespace: "default",
@@ -935,15 +935,15 @@ func TestValidate_SocatRouteBothPodAndService(t *testing.T) {
 
 	err := cfg.Validate()
 	if err == nil {
-		t.Error("expected error for socat route with both pod and service")
+		t.Error("expected error for jump route with both pod and service")
 	}
 	if !strings.Contains(err.Error(), "cannot specify both via.pod and via.service") {
 		t.Errorf("expected error about mutual exclusivity, got: %v", err)
 	}
 }
 
-// TestValidate_SocatRouteMissingTarget tests that target host is required
-func TestValidate_SocatRouteMissingTarget(t *testing.T) {
+// TestValidate_JumpRouteMissingTarget tests that target host is required
+func TestValidate_JumpRouteMissingTarget(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
 		HTTP: HTTPConfig{
@@ -952,7 +952,7 @@ func TestValidate_SocatRouteMissingTarget(t *testing.T) {
 		},
 		TCP: TCPConfig{
 			K8s: TCPK8sConfig{
-				Socat: map[int]SocatRouteConfig{
+				Jump: map[int]JumpRouteConfig{
 					3306: {
 						Context:   "test-context",
 						Namespace: "default",
@@ -971,15 +971,15 @@ func TestValidate_SocatRouteMissingTarget(t *testing.T) {
 
 	err := cfg.Validate()
 	if err == nil {
-		t.Error("expected error for socat route without target host")
+		t.Error("expected error for jump route without target host")
 	}
 	if !strings.Contains(err.Error(), "target.host is required") {
 		t.Errorf("expected error about missing target host, got: %v", err)
 	}
 }
 
-// TestValidate_SocatRouteInvalidTargetPort tests that target port must be valid
-func TestValidate_SocatRouteInvalidTargetPort(t *testing.T) {
+// TestValidate_JumpRouteInvalidTargetPort tests that target port must be valid
+func TestValidate_JumpRouteInvalidTargetPort(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
 		HTTP: HTTPConfig{
@@ -988,7 +988,7 @@ func TestValidate_SocatRouteInvalidTargetPort(t *testing.T) {
 		},
 		TCP: TCPConfig{
 			K8s: TCPK8sConfig{
-				Socat: map[int]SocatRouteConfig{
+				Jump: map[int]JumpRouteConfig{
 					3306: {
 						Context:   "test-context",
 						Namespace: "default",
@@ -1007,15 +1007,15 @@ func TestValidate_SocatRouteInvalidTargetPort(t *testing.T) {
 
 	err := cfg.Validate()
 	if err == nil {
-		t.Error("expected error for socat route with invalid target port")
+		t.Error("expected error for jump route with invalid target port")
 	}
 	if !strings.Contains(err.Error(), "target.port must be between") {
 		t.Errorf("expected error about invalid target port, got: %v", err)
 	}
 }
 
-// TestValidate_PortCollisionBetweenRoutesAndSocat tests port collision detection
-func TestValidate_PortCollisionBetweenRoutesAndSocat(t *testing.T) {
+// TestValidate_PortCollisionBetweenRoutesAndJump tests port collision detection
+func TestValidate_PortCollisionBetweenRoutesAndJump(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
 		HTTP: HTTPConfig{
@@ -1032,7 +1032,7 @@ func TestValidate_PortCollisionBetweenRoutesAndSocat(t *testing.T) {
 						Port:      3306,
 					},
 				},
-				Socat: map[int]SocatRouteConfig{
+				Jump: map[int]JumpRouteConfig{
 					3306: { // Same port - collision!
 						Context:   "test-context",
 						Namespace: "default",
@@ -1051,15 +1051,15 @@ func TestValidate_PortCollisionBetweenRoutesAndSocat(t *testing.T) {
 
 	err := cfg.Validate()
 	if err == nil {
-		t.Error("expected error for port collision between routes and socat")
+		t.Error("expected error for port collision between routes and jump")
 	}
 	if !strings.Contains(err.Error(), "port already used in tcp.k8s.routes") {
 		t.Errorf("expected error about port collision, got: %v", err)
 	}
 }
 
-// TestValidate_SocatRouteWithDirectPod tests socat route with direct pod targeting
-func TestValidate_SocatRouteWithDirectPod(t *testing.T) {
+// TestValidate_JumpRouteWithDirectPod tests jump route with direct pod targeting
+func TestValidate_JumpRouteWithDirectPod(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
 		HTTP: HTTPConfig{
@@ -1068,7 +1068,7 @@ func TestValidate_SocatRouteWithDirectPod(t *testing.T) {
 		},
 		TCP: TCPConfig{
 			K8s: TCPK8sConfig{
-				Socat: map[int]SocatRouteConfig{
+				Jump: map[int]JumpRouteConfig{
 					3306: {
 						Context:   "test-context",
 						Namespace: "default",
@@ -1088,12 +1088,12 @@ func TestValidate_SocatRouteWithDirectPod(t *testing.T) {
 
 	err := cfg.Validate()
 	if err != nil {
-		t.Errorf("unexpected error for socat route with direct pod: %v", err)
+		t.Errorf("unexpected error for jump route with direct pod: %v", err)
 	}
 }
 
-// TestLoadConfig_WithSocatRoutes tests loading config with socat routes
-func TestLoadConfig_WithSocatRoutes(t *testing.T) {
+// TestLoadConfig_WithJumpRoutes tests loading config with jump routes
+func TestLoadConfig_WithJumpRoutes(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
@@ -1106,7 +1106,7 @@ http:
 tcp:
   idle_timeout: 60m
   k8s:
-    socat:
+    jump:
       3306:
         context: eks-prod
         namespace: default
@@ -1134,15 +1134,15 @@ tcp:
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	// Verify socat routes were loaded
-	if len(cfg.TCP.K8s.Socat) != 2 {
-		t.Fatalf("expected 2 socat routes, got %d", len(cfg.TCP.K8s.Socat))
+	// Verify jump routes were loaded
+	if len(cfg.TCP.K8s.Jump) != 2 {
+		t.Fatalf("expected 2 jump routes, got %d", len(cfg.TCP.K8s.Jump))
 	}
 
 	// Verify MySQL route
-	mysql, ok := cfg.TCP.K8s.Socat[3306]
+	mysql, ok := cfg.TCP.K8s.Jump[3306]
 	if !ok {
-		t.Fatal("expected socat route for port 3306")
+		t.Fatal("expected jump route for port 3306")
 	}
 	if mysql.Context != "eks-prod" {
 		t.Errorf("expected context 'eks-prod', got %q", mysql.Context)
@@ -1155,9 +1155,9 @@ tcp:
 	}
 
 	// Verify PostgreSQL route
-	postgres, ok := cfg.TCP.K8s.Socat[5432]
+	postgres, ok := cfg.TCP.K8s.Jump[5432]
 	if !ok {
-		t.Fatal("expected socat route for port 5432")
+		t.Fatal("expected jump route for port 5432")
 	}
 	if postgres.Via.Pod != "bastion-pod" {
 		t.Errorf("expected via.pod 'bastion-pod', got %q", postgres.Via.Pod)
@@ -1222,7 +1222,7 @@ func TestIsValidTargetHost(t *testing.T) {
 	}
 }
 
-func TestValidate_SocatRouteInvalidTargetHost(t *testing.T) {
+func TestValidate_JumpRouteInvalidTargetHost(t *testing.T) {
 	cfg := &Config{
 		ApiVersion: CurrentApiVersion,
 		HTTP: HTTPConfig{
@@ -1231,7 +1231,7 @@ func TestValidate_SocatRouteInvalidTargetHost(t *testing.T) {
 		},
 		TCP: TCPConfig{
 			K8s: TCPK8sConfig{
-				Socat: map[int]SocatRouteConfig{
+				Jump: map[int]JumpRouteConfig{
 					3306: {
 						Context:   "test",
 						Namespace: "default",
@@ -1252,5 +1252,59 @@ func TestValidate_SocatRouteInvalidTargetHost(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid characters") {
 		t.Errorf("expected error about invalid characters, got: %v", err)
+	}
+}
+
+// TestJumpRouteConfig_GetMethod tests the GetMethod() helper
+func TestJumpRouteConfig_GetMethod(t *testing.T) {
+	tests := []struct {
+		name     string
+		method   string
+		expected string
+	}{
+		{"empty method defaults to socat", "", "socat"},
+		{"explicit socat", "socat", "socat"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			route := JumpRouteConfig{Method: tt.method}
+			got := route.GetMethod()
+			if got != tt.expected {
+				t.Errorf("GetMethod() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestValidate_JumpRouteInvalidMethod tests validation of unsupported method
+func TestValidate_JumpRouteInvalidMethod(t *testing.T) {
+	cfg := &Config{
+		ApiVersion: CurrentApiVersion,
+		HTTP: HTTPConfig{
+			ListenAddr:  ":8989",
+			IdleTimeout: 60 * time.Minute,
+		},
+		TCP: TCPConfig{
+			K8s: TCPK8sConfig{
+				Jump: map[int]JumpRouteConfig{
+					3306: {
+						Context:   "test",
+						Namespace: "default",
+						Via:       ViaConfig{Pod: "bastion"},
+						Target:    TargetConfig{Host: "db.internal", Port: 3306},
+						Method:    "invalid-method",
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for invalid method")
+	}
+	if !strings.Contains(err.Error(), "unsupported method") {
+		t.Errorf("expected error about unsupported method, got: %v", err)
 	}
 }

@@ -16,7 +16,7 @@ type listenerType int
 
 const (
 	listenerTypeRoute listenerType = iota // direct port-forward
-	listenerTypeSocat                     // jump-host via exec+socat
+	listenerTypeJump                      // jump-host via exec+socat/nc
 )
 
 type Server struct {
@@ -59,8 +59,8 @@ func (s *Server) Start() error {
 		}
 	}
 
-	for port := range s.config.TCP.K8s.Socat {
-		if err := s.startListener(port, listenerTypeSocat); err != nil {
+	for port := range s.config.TCP.K8s.Jump {
+		if err := s.startListener(port, listenerTypeJump); err != nil {
 			s.Shutdown()
 			return err
 		}
@@ -91,8 +91,8 @@ func (s *Server) startListener(port int, lt listenerType) error {
 	go s.acceptLoop(pl)
 
 	typeStr := "route"
-	if lt == listenerTypeSocat {
-		typeStr = "socat"
+	if lt == listenerTypeJump {
+		typeStr = "jump"
 	}
 	log.Printf("TCP listener started on %s (%s)", addr, typeStr)
 	return nil
@@ -117,8 +117,8 @@ func (s *Server) acceptLoop(pl *portListener) {
 			}
 		}
 
-		if pl.listenerType == listenerTypeSocat {
-			go s.handleSocatConnection(pl.port, conn)
+		if pl.listenerType == listenerTypeJump {
+			go s.handleJumpConnection(pl.port, conn)
 		} else {
 			go s.handleConnection(pl.port, conn)
 		}
@@ -187,28 +187,28 @@ func (s *Server) handleConnection(localPort int, conn net.Conn) {
 	}
 }
 
-func (s *Server) handleSocatConnection(localPort int, conn net.Conn) {
+func (s *Server) handleJumpConnection(localPort int, conn net.Conn) {
 	s.mu.RLock()
-	route, exists := s.config.TCP.K8s.Socat[localPort]
+	route, exists := s.config.TCP.K8s.Jump[localPort]
 	kubeconfigs := s.config.TCP.K8s.ResolvedKubeconfigs
 	s.mu.RUnlock()
 
 	if !exists {
-		log.Printf("[socat:%d] No route configured", localPort)
+		log.Printf("[jump:%d] No route configured", localPort)
 		conn.Close()
 		return
 	}
 
 	clientset, restConfig, err := s.manager.GetClientForContext(kubeconfigs, route.Context)
 	if err != nil {
-		log.Printf("[socat:%d] Failed to get K8s client: %v", localPort, err)
+		log.Printf("[jump:%d] Failed to get K8s client: %v", localPort, err)
 		conn.Close()
 		return
 	}
 
 	handler := NewJumpHandler(route, kubeconfigs, clientset, restConfig, s.verbose)
 	if err := handler.HandleConnection(s.ctx, conn, localPort); err != nil {
-		log.Printf("[socat:%d] Connection error: %v", localPort, err)
+		log.Printf("[jump:%d] Connection error: %v", localPort, err)
 	}
 }
 
@@ -230,8 +230,8 @@ func (s *Server) Shutdown() {
 func (s *Server) UpdateConfig(newConfig *config.Config) {
 	oldRoutes := s.config.TCP.K8s.Routes
 	newRoutes := newConfig.TCP.K8s.Routes
-	oldSocat := s.config.TCP.K8s.Socat
-	newSocat := newConfig.TCP.K8s.Socat
+	oldJump := s.config.TCP.K8s.Jump
+	newJump := newConfig.TCP.K8s.Jump
 
 	// Stop listeners for removed route ports
 	s.mu.Lock()
@@ -246,11 +246,11 @@ func (s *Server) UpdateConfig(newConfig *config.Config) {
 		}
 	}
 
-	// Stop listeners for removed socat ports
-	for port := range oldSocat {
-		if _, exists := newSocat[port]; !exists {
+	// Stop listeners for removed jump ports
+	for port := range oldJump {
+		if _, exists := newJump[port]; !exists {
 			if pl, ok := s.listeners[port]; ok {
-				log.Printf("TCP socat port %d removed, stopping listener", port)
+				log.Printf("TCP jump port %d removed, stopping listener", port)
 				close(pl.stopChan)
 				pl.listener.Close()
 				delete(s.listeners, port)
@@ -269,12 +269,12 @@ func (s *Server) UpdateConfig(newConfig *config.Config) {
 		}
 	}
 
-	// Start listeners for new socat ports
-	for port := range newSocat {
-		if _, existed := oldSocat[port]; !existed {
-			log.Printf("TCP socat port %d added, starting listener", port)
-			if err := s.startListener(port, listenerTypeSocat); err != nil {
-				log.Printf("Failed to start TCP socat listener on port %d: %v", port, err)
+	// Start listeners for new jump ports
+	for port := range newJump {
+		if _, existed := oldJump[port]; !existed {
+			log.Printf("TCP jump port %d added, starting listener", port)
+			if err := s.startListener(port, listenerTypeJump); err != nil {
+				log.Printf("Failed to start TCP jump listener on port %d: %v", port, err)
 			}
 		}
 	}

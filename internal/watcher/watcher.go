@@ -10,17 +10,13 @@ import (
 )
 
 type ConfigUpdater interface {
-	UpdateConfig(newConfig *config.Config)
-}
-
-type TCPConfigUpdater interface {
 	UpdateConfig(cfg *config.Config)
 }
 
 type ConfigWatcher struct {
 	configPath string
 	manager    ConfigUpdater
-	tcpServer  TCPConfigUpdater
+	tcpServer  ConfigUpdater
 	watcher    *fsnotify.Watcher
 	cliVerbose bool // Preserve CLI --verbose flag across reloads
 
@@ -63,7 +59,7 @@ func (cw *ConfigWatcher) Stop() {
 	<-cw.doneChan
 }
 
-func (cw *ConfigWatcher) SetTCPServer(tcpServer TCPConfigUpdater) {
+func (cw *ConfigWatcher) SetTCPServer(tcpServer ConfigUpdater) {
 	cw.tcpServer = tcpServer
 }
 

@@ -102,7 +102,7 @@ sequenceDiagram
         tcp->>tun: Start() if not running
         tun->>k8s: SPDY port-forward
         tcp->>tcp: Bidirectional copy to backend
-    else Socat type (jump-host)
+    else Jump type (jump-host)
         tcp->>mgr: GetClientForContext()
         mgr-->>tcp: clientset, restConfig
         tcp->>jump: NewJumpHandler(route)
@@ -167,7 +167,7 @@ sequenceDiagram
     cfg-->>caller: *Config, error
 
     Note over ops: PrintRoutes(), PrintTCPRoutes()
-    Note over ops: PrintSocatRoutes()
+    Note over ops: PrintJumpRoutes()
 ```
 
 | File | Purpose |
@@ -251,8 +251,8 @@ sequenceDiagram
         srv->>srv: handleConnection()
         srv->>srv: manager.GetOrCreateTCPTunnel()
         srv->>srv: io.Copy bidirectional
-    else listenerTypeSocat
-        srv->>srv: handleSocatConnection()
+    else listenerTypeJump
+        srv->>srv: handleJumpConnection()
         srv->>jump: NewJumpHandler(route)
         jump->>jump: discoverJumpPod()
         alt Via Service

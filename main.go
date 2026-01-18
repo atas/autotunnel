@@ -83,20 +83,20 @@ https://github.com/atas/autotunnel`)
 	}
 
 	fmt.Println("-----------------------------------------------------------------------------")
-	if len(cfg.HTTP.K8s.Routes) == 0 && len(cfg.TCP.K8s.Routes) == 0 && len(cfg.TCP.K8s.Socat) == 0 {
+	if len(cfg.HTTP.K8s.Routes) == 0 && len(cfg.TCP.K8s.Routes) == 0 && len(cfg.TCP.K8s.Jump) == 0 {
 		fmt.Println("Add/remove routes !!!❗️⚠️🔴")
 	}
 	fmt.Printf("Config: %s\n", configPath)
 	fmt.Println("-----------------------------------------------------------------------------")
 	cfg.PrintRoutes()
 	cfg.PrintTCPRoutes()
-	cfg.PrintSocatRoutes()
+	cfg.PrintJumpRoutes()
 
 	manager := tunnelmgr.NewManager(cfg)
 	server := httpserver.NewServer(cfg, manager)
 
 	var tcpServer *tcpserver.Server
-	if len(cfg.TCP.K8s.Routes) > 0 || len(cfg.TCP.K8s.Socat) > 0 {
+	if len(cfg.TCP.K8s.Routes) > 0 || len(cfg.TCP.K8s.Jump) > 0 {
 		tcpServer = tcpserver.NewServer(cfg, manager)
 	}
 

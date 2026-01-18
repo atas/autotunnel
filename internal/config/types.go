@@ -30,10 +30,10 @@ type TCPConfig struct {
 }
 
 type TCPK8sConfig struct {
-	Kubeconfig          string                    `yaml:"kubeconfig"`
-	ResolvedKubeconfigs []string                  `yaml:"-"` // Computed: resolved paths (not from YAML)
-	Routes              map[int]TCPRouteConfig    `yaml:"routes"` // local port -> direct port-forward route
-	Socat               map[int]SocatRouteConfig  `yaml:"socat"`  // local port -> jump-host route via exec+socat
+	Kubeconfig          string                   `yaml:"kubeconfig"`
+	ResolvedKubeconfigs []string                 `yaml:"-"` // Computed: resolved paths (not from YAML)
+	Routes              map[int]TCPRouteConfig   `yaml:"routes"` // local port -> direct port-forward route
+	Jump                map[int]JumpRouteConfig  `yaml:"jump"`   // local port -> jump-host route via exec+socat/nc
 }
 
 // TCPRouteConfig defines a single TCP route (simpler than K8sRouteConfig - no Scheme field)
@@ -46,13 +46,22 @@ type TCPRouteConfig struct {
 }
 
 
-// SocatRouteConfig defines a jump-host route via kubectl exec + socat/nc
+// JumpRouteConfig defines a jump-host route via kubectl exec + socat/nc
 // This allows connecting to VPC-internal services (RDS, Cloud SQL, etc.) through a jump pod
-type SocatRouteConfig struct {
-	Context   string       `yaml:"context"`   // K8s context name
-	Namespace string       `yaml:"namespace"` // K8s namespace
-	Via       ViaConfig    `yaml:"via"`       // Jump pod configuration
-	Target    TargetConfig `yaml:"target"`    // External target (e.g., RDS hostname)
+type JumpRouteConfig struct {
+	Context   string       `yaml:"context"`         // K8s context name
+	Namespace string       `yaml:"namespace"`       // K8s namespace
+	Via       ViaConfig    `yaml:"via"`             // Jump pod configuration
+	Target    TargetConfig `yaml:"target"`          // External target (e.g., RDS hostname)
+	Method    string       `yaml:"method,omitempty"` // "socat" (default) or future alternatives
+}
+
+// GetMethod returns the forwarding method, defaulting to "socat" if not specified
+func (r *JumpRouteConfig) GetMethod() string {
+	if r.Method == "" {
+		return "socat"
+	}
+	return r.Method
 }
 
 type ViaConfig struct {

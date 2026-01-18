@@ -24,7 +24,7 @@ func (m *mockManager) GetOrCreateTCPTunnel(port int) (tunnelmgr.TunnelHandle, er
 }
 
 func (m *mockManager) GetClientForContext(kubeconfigPaths []string, contextName string) (*kubernetes.Clientset, *rest.Config, error) {
-	// Return nil for testing - socat tests would need more elaborate mocking
+	// Return nil for testing - jump tests would need more elaborate mocking
 	return nil, nil, nil
 }
 
@@ -262,8 +262,8 @@ func TestServer_Shutdown_MultipleCallsSafe(t *testing.T) {
 	s.mu.RUnlock()
 }
 
-func TestServer_Start_MixedRoutesAndSocat(t *testing.T) {
-	// Test config with both regular routes and socat routes
+func TestServer_Start_MixedRoutesAndJump(t *testing.T) {
+	// Test config with both regular routes and jump routes
 	cfg := &config.Config{
 		Verbose: false,
 		TCP: config.TCPConfig{
@@ -271,7 +271,7 @@ func TestServer_Start_MixedRoutesAndSocat(t *testing.T) {
 				Routes: map[int]config.TCPRouteConfig{
 					19600: {Context: "test", Namespace: "ns", Service: "svc1", Port: 80},
 				},
-				Socat: map[int]config.SocatRouteConfig{
+				Jump: map[int]config.JumpRouteConfig{
 					19601: {
 						Context:   "test",
 						Namespace: "ns",
@@ -299,7 +299,7 @@ func TestServer_Start_MixedRoutesAndSocat(t *testing.T) {
 	// Should have both listeners
 	s.mu.RLock()
 	if len(s.listeners) != 2 {
-		t.Errorf("Expected 2 listeners (route + socat), got %d", len(s.listeners))
+		t.Errorf("Expected 2 listeners (route + jump), got %d", len(s.listeners))
 	}
 	// Verify route listener
 	if pl, exists := s.listeners[19600]; !exists {
@@ -307,17 +307,17 @@ func TestServer_Start_MixedRoutesAndSocat(t *testing.T) {
 	} else if pl.listenerType != listenerTypeRoute {
 		t.Errorf("Port 19600 should be route type, got %v", pl.listenerType)
 	}
-	// Verify socat listener
+	// Verify jump listener
 	if pl, exists := s.listeners[19601]; !exists {
-		t.Error("Expected listener for socat port 19601")
-	} else if pl.listenerType != listenerTypeSocat {
-		t.Errorf("Port 19601 should be socat type, got %v", pl.listenerType)
+		t.Error("Expected listener for jump port 19601")
+	} else if pl.listenerType != listenerTypeJump {
+		t.Errorf("Port 19601 should be jump type, got %v", pl.listenerType)
 	}
 	s.mu.RUnlock()
 }
 
-func TestServer_UpdateConfig_AddsSocatPorts(t *testing.T) {
-	// Start with no socat routes
+func TestServer_UpdateConfig_AddsJumpPorts(t *testing.T) {
+	// Start with no jump routes
 	cfg := &config.Config{
 		Verbose: false,
 		TCP: config.TCPConfig{
@@ -325,7 +325,7 @@ func TestServer_UpdateConfig_AddsSocatPorts(t *testing.T) {
 				Routes: map[int]config.TCPRouteConfig{
 					19700: {Context: "test", Namespace: "ns", Service: "svc1", Port: 80},
 				},
-				Socat: map[int]config.SocatRouteConfig{},
+				Jump: map[int]config.JumpRouteConfig{},
 			},
 		},
 	}
@@ -345,7 +345,7 @@ func TestServer_UpdateConfig_AddsSocatPorts(t *testing.T) {
 	}
 	s.mu.RUnlock()
 
-	// Update config to add a socat route
+	// Update config to add a jump route
 	newCfg := &config.Config{
 		Verbose: false,
 		TCP: config.TCPConfig{
@@ -353,7 +353,7 @@ func TestServer_UpdateConfig_AddsSocatPorts(t *testing.T) {
 				Routes: map[int]config.TCPRouteConfig{
 					19700: {Context: "test", Namespace: "ns", Service: "svc1", Port: 80},
 				},
-				Socat: map[int]config.SocatRouteConfig{
+				Jump: map[int]config.JumpRouteConfig{
 					19701: {
 						Context:   "test",
 						Namespace: "ns",
@@ -366,27 +366,27 @@ func TestServer_UpdateConfig_AddsSocatPorts(t *testing.T) {
 	}
 	s.UpdateConfig(newCfg)
 
-	// Verify new socat listener was added
+	// Verify new jump listener was added
 	s.mu.RLock()
 	if len(s.listeners) != 2 {
-		t.Errorf("Expected 2 listeners after adding socat, got %d", len(s.listeners))
+		t.Errorf("Expected 2 listeners after adding jump, got %d", len(s.listeners))
 	}
 	if pl, exists := s.listeners[19701]; !exists {
-		t.Error("Expected listener for socat port 19701")
-	} else if pl.listenerType != listenerTypeSocat {
-		t.Errorf("Port 19701 should be socat type")
+		t.Error("Expected listener for jump port 19701")
+	} else if pl.listenerType != listenerTypeJump {
+		t.Errorf("Port 19701 should be jump type")
 	}
 	s.mu.RUnlock()
 }
 
-func TestServer_UpdateConfig_RemovesSocatPorts(t *testing.T) {
-	// Start with a socat route
+func TestServer_UpdateConfig_RemovesJumpPorts(t *testing.T) {
+	// Start with a jump route
 	cfg := &config.Config{
 		Verbose: false,
 		TCP: config.TCPConfig{
 			K8s: config.TCPK8sConfig{
 				Routes: map[int]config.TCPRouteConfig{},
-				Socat: map[int]config.SocatRouteConfig{
+				Jump: map[int]config.JumpRouteConfig{
 					19800: {
 						Context:   "test",
 						Namespace: "ns",
@@ -413,29 +413,29 @@ func TestServer_UpdateConfig_RemovesSocatPorts(t *testing.T) {
 	}
 	s.mu.RUnlock()
 
-	// Update config to remove socat route
+	// Update config to remove jump route
 	newCfg := &config.Config{
 		Verbose: false,
 		TCP: config.TCPConfig{
 			K8s: config.TCPK8sConfig{
 				Routes: map[int]config.TCPRouteConfig{},
-				Socat:  map[int]config.SocatRouteConfig{},
+				Jump:  map[int]config.JumpRouteConfig{},
 			},
 		},
 	}
 	s.UpdateConfig(newCfg)
 
-	// Verify socat listener was removed
+	// Verify jump listener was removed
 	s.mu.RLock()
 	if len(s.listeners) != 0 {
-		t.Errorf("Expected 0 listeners after removing socat, got %d", len(s.listeners))
+		t.Errorf("Expected 0 listeners after removing jump, got %d", len(s.listeners))
 	}
 	s.mu.RUnlock()
 
 	// Verify port is released
 	_, err = net.DialTimeout("tcp", "127.0.0.1:19800", 100*time.Millisecond)
 	if err == nil {
-		t.Error("Expected connection to removed socat port 19800 to fail")
+		t.Error("Expected connection to removed jump port 19800 to fail")
 	}
 }
 

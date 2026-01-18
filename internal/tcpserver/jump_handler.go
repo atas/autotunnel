@@ -20,14 +20,14 @@ import (
 // JumpHandler forwards TCP via kubectl exec + socat into a pod.
 // Used for reaching VPC-internal services like RDS through a jump pod.
 type JumpHandler struct {
-	route      config.SocatRouteConfig
+	route      config.JumpRouteConfig
 	kubeconfig []string
 	clientset  kubernetes.Interface
 	restConfig *rest.Config
 	verbose    bool
 }
 
-func NewJumpHandler(route config.SocatRouteConfig, kubeconfig []string, clientset kubernetes.Interface, restConfig *rest.Config, verbose bool) *JumpHandler {
+func NewJumpHandler(route config.JumpRouteConfig, kubeconfig []string, clientset kubernetes.Interface, restConfig *rest.Config, verbose bool) *JumpHandler {
 	return &JumpHandler{
 		route:      route,
 		kubeconfig: kubeconfig,
@@ -54,10 +54,10 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 
 	if h.verbose {
 		if h.route.Via.Service != "" {
-			log.Printf("[socat:%d] Connecting via service %s (pod %s/%s) to %s:%d",
+			log.Printf("[jump:%d] Connecting via service %s (pod %s/%s) to %s:%d",
 				localPort, h.route.Via.Service, h.route.Namespace, podName, h.route.Target.Host, h.route.Target.Port)
 		} else {
-			log.Printf("[socat:%d] Connecting via pod %s/%s to %s:%d",
+			log.Printf("[jump:%d] Connecting via pod %s/%s to %s:%d",
 				localPort, h.route.Namespace, podName, h.route.Target.Host, h.route.Target.Port)
 		}
 	}
@@ -99,7 +99,7 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 		for {
 			n, err := stderrReader.Read(buf)
 			if n > 0 && h.verbose {
-				log.Printf("[socat:%d] stderr: %s", localPort, string(buf[:n]))
+				log.Printf("[jump:%d] stderr: %s", localPort, string(buf[:n]))
 			}
 			if err != nil {
 				return
@@ -128,7 +128,7 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 	}
 
 	if h.verbose {
-		log.Printf("[socat:%d] Connection closed", localPort)
+		log.Printf("[jump:%d] Connection closed", localPort)
 	}
 
 	return nil

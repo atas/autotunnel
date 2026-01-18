@@ -1622,11 +1622,11 @@ func TestTCPBidirectionalData(t *testing.T) {
 }
 
 // ============================================================================
-// Socat/Jump-Host TCP Forwarding Tests
+// Jump-Host TCP Forwarding Tests
 // ============================================================================
 
-// socatRouteConfig represents a socat (jump-host) route configuration for tests
-type socatRouteConfig struct {
+// jumpRouteConfig represents a jump-host route configuration for tests
+type jumpRouteConfig struct {
 	Context    string
 	Namespace  string
 	ViaService string // Jump pod discovered via service (mutually exclusive with ViaPod)
@@ -1636,8 +1636,8 @@ type socatRouteConfig struct {
 	TargetPort int    // Target port
 }
 
-// writeTestConfigWithSocat creates a test configuration file with HTTP, TCP, and socat routes
-func writeTestConfigWithSocat(t *testing.T, httpServices map[string]serviceConfig, tcpRoutes map[int]tcpRouteConfig, socatRoutes map[int]socatRouteConfig) string {
+// writeTestConfigWithJump creates a test configuration file with HTTP, TCP, and jump routes
+func writeTestConfigWithJump(t *testing.T, httpServices map[string]serviceConfig, tcpRoutes map[int]tcpRouteConfig, jumpRoutes map[int]jumpRouteConfig) string {
 	t.Helper()
 
 	kubeconfig := os.Getenv("KUBECONFIG")
@@ -1681,8 +1681,8 @@ func writeTestConfigWithSocat(t *testing.T, httpServices map[string]serviceConfi
 		}
 	}
 
-	// Write TCP section if we have routes or socat
-	if len(tcpRoutes) > 0 || len(socatRoutes) > 0 {
+	// Write TCP section if we have routes or jump
+	if len(tcpRoutes) > 0 || len(jumpRoutes) > 0 {
 		sb.WriteString("\ntcp:\n")
 		sb.WriteString(fmt.Sprintf("  idle_timeout: %s\n", idleTimeout))
 		sb.WriteString("  k8s:\n")
@@ -1704,10 +1704,10 @@ func writeTestConfigWithSocat(t *testing.T, httpServices map[string]serviceConfi
 			}
 		}
 
-		// Write socat (jump-host) routes
-		if len(socatRoutes) > 0 {
-			sb.WriteString("    socat:\n")
-			for port, route := range socatRoutes {
+		// Write jump-host routes
+		if len(jumpRoutes) > 0 {
+			sb.WriteString("    jump:\n")
+			for port, route := range jumpRoutes {
 				sb.WriteString(fmt.Sprintf("      %d:\n", port))
 				sb.WriteString(fmt.Sprintf("        context: %s\n", route.Context))
 				sb.WriteString(fmt.Sprintf("        namespace: %s\n", route.Namespace))
@@ -1728,7 +1728,7 @@ func writeTestConfigWithSocat(t *testing.T, httpServices map[string]serviceConfi
 	}
 
 	// Write to temp file
-	tmpFile, err := os.CreateTemp("", "autotunnel-socat-test-config-*.yaml")
+	tmpFile, err := os.CreateTemp("", "autotunnel-jump-test-config-*.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create temp config: %v", err)
 	}
@@ -1745,9 +1745,9 @@ func writeTestConfigWithSocat(t *testing.T, httpServices map[string]serviceConfi
 	return tmpFile.Name()
 }
 
-// TestSocatBasicConnection tests basic connectivity through a jump pod via service
-func TestSocatBasicConnection(t *testing.T) {
-	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+// TestJumpBasicConnection tests basic connectivity through a jump pod via service
+func TestJumpBasicConnection(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19100: {
 			Context:    getTestContext(),
 			Namespace:  "autotunnel-test",
@@ -1765,7 +1765,7 @@ func TestSocatBasicConnection(t *testing.T) {
 
 	conn, err := net.DialTimeout("tcp", "localhost:19100", testTimeout)
 	if err != nil {
-		t.Fatalf("Failed to connect to socat tunnel: %v", err)
+		t.Fatalf("Failed to connect to jump tunnel: %v", err)
 	}
 	defer conn.Close()
 
@@ -1788,9 +1788,9 @@ func TestSocatBasicConnection(t *testing.T) {
 	}
 }
 
-// TestSocatViaPod tests jump-host routing using direct pod targeting
-func TestSocatViaPod(t *testing.T) {
-	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+// TestJumpViaPod tests jump-host routing using direct pod targeting
+func TestJumpViaPod(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19101: {
 			Context:    getTestContext(),
 			Namespace:  "autotunnel-test",
@@ -1808,7 +1808,7 @@ func TestSocatViaPod(t *testing.T) {
 
 	conn, err := net.DialTimeout("tcp", "localhost:19101", testTimeout)
 	if err != nil {
-		t.Fatalf("Failed to connect to socat tunnel: %v", err)
+		t.Fatalf("Failed to connect to jump tunnel: %v", err)
 	}
 	defer conn.Close()
 
@@ -1831,9 +1831,9 @@ func TestSocatViaPod(t *testing.T) {
 	}
 }
 
-// TestSocatBidirectionalData tests bidirectional data transfer with various sizes through jump host
-func TestSocatBidirectionalData(t *testing.T) {
-	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+// TestJumpBidirectionalData tests bidirectional data transfer with various sizes through jump host
+func TestJumpBidirectionalData(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19102: {
 			Context:    getTestContext(),
 			Namespace:  "autotunnel-test",
@@ -1885,9 +1885,9 @@ func TestSocatBidirectionalData(t *testing.T) {
 	}
 }
 
-// TestSocatMultipleConnections tests multiple sequential connections through jump host
-func TestSocatMultipleConnections(t *testing.T) {
-	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+// TestJumpMultipleConnections tests multiple sequential connections through jump host
+func TestJumpMultipleConnections(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19103: {
 			Context:    getTestContext(),
 			Namespace:  "autotunnel-test",
@@ -1932,9 +1932,9 @@ func TestSocatMultipleConnections(t *testing.T) {
 	}
 }
 
-// TestSocatMultipleRoutes tests multiple socat routes on different ports
-func TestSocatMultipleRoutes(t *testing.T) {
-	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+// TestJumpMultipleRoutes tests multiple jump routes on different ports
+func TestJumpMultipleRoutes(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19104: {
 			Context:    getTestContext(),
 			Namespace:  "autotunnel-test",
@@ -1995,9 +1995,9 @@ func TestSocatMultipleRoutes(t *testing.T) {
 	}
 }
 
-// TestSocatConcurrentConnections tests multiple concurrent connections through jump host
-func TestSocatConcurrentConnections(t *testing.T) {
-	configPath := writeTestConfigWithSocat(t, nil, nil, map[int]socatRouteConfig{
+// TestJumpConcurrentConnections tests multiple concurrent connections through jump host
+func TestJumpConcurrentConnections(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil, nil, map[int]jumpRouteConfig{
 		19106: {
 			Context:    getTestContext(),
 			Namespace:  "autotunnel-test",
@@ -2065,13 +2065,13 @@ func TestSocatConcurrentConnections(t *testing.T) {
 		for _, err := range allErrors {
 			t.Error(err)
 		}
-		t.Fatalf("%d out of %d concurrent socat connections failed", len(allErrors), numConnections)
+		t.Fatalf("%d out of %d concurrent jump connections failed", len(allErrors), numConnections)
 	}
 }
 
-// TestSocatMixedWithTCPRoutes tests that socat routes work alongside direct TCP routes
-func TestSocatMixedWithTCPRoutes(t *testing.T) {
-	configPath := writeTestConfigWithSocat(t, nil,
+// TestJumpMixedWithTCPRoutes tests that jump routes work alongside direct TCP routes
+func TestJumpMixedWithTCPRoutes(t *testing.T) {
+	configPath := writeTestConfigWithJump(t, nil,
 		map[int]tcpRouteConfig{
 			19107: {
 				Context:   getTestContext(),
@@ -2080,7 +2080,7 @@ func TestSocatMixedWithTCPRoutes(t *testing.T) {
 				Port:      9999,
 			},
 		},
-		map[int]socatRouteConfig{
+		map[int]jumpRouteConfig{
 			19108: {
 				Context:    getTestContext(),
 				Namespace:  "autotunnel-test",
@@ -2124,11 +2124,11 @@ func TestSocatMixedWithTCPRoutes(t *testing.T) {
 		}
 	})
 
-	// Test socat route
-	t.Run("socat-route", func(t *testing.T) {
+	// Test jump route
+	t.Run("jump-route", func(t *testing.T) {
 		conn, err := net.DialTimeout("tcp", "localhost:19108", testTimeout)
 		if err != nil {
-			t.Fatalf("Failed to connect to socat route: %v", err)
+			t.Fatalf("Failed to connect to jump route: %v", err)
 		}
 		defer conn.Close()
 
@@ -2136,7 +2136,7 @@ func TestSocatMixedWithTCPRoutes(t *testing.T) {
 			t.Fatalf("Failed to set deadline: %v", err)
 		}
 
-		testData := []byte("Socat route test\n")
+		testData := []byte("Jump route test\n")
 		if _, err := conn.Write(testData); err != nil {
 			t.Fatalf("Failed to write: %v", err)
 		}

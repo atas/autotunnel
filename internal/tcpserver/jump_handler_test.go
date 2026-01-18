@@ -17,7 +17,7 @@ import (
 )
 
 func TestNewJumpHandler(t *testing.T) {
-	route := config.SocatRouteConfig{
+	route := config.JumpRouteConfig{
 		Context:   "test-context",
 		Namespace: "test-ns",
 		Via: config.ViaConfig{
@@ -55,7 +55,7 @@ func TestNewJumpHandler(t *testing.T) {
 }
 
 func TestJumpHandler_discoverJumpPod_DirectPod(t *testing.T) {
-	route := config.SocatRouteConfig{
+	route := config.JumpRouteConfig{
 		Context:   "test-context",
 		Namespace: "test-ns",
 		Via: config.ViaConfig{
@@ -116,7 +116,7 @@ func TestJumpHandler_discoverJumpPod_ViaService(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset(svc, pod)
 
-	route := config.SocatRouteConfig{
+	route := config.JumpRouteConfig{
 		Context:   "test-context",
 		Namespace: "test-ns",
 		Via: config.ViaConfig{
@@ -147,7 +147,7 @@ func TestJumpHandler_discoverJumpPod_ViaService(t *testing.T) {
 func TestJumpHandler_discoverJumpPod_ServiceNotFound(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 
-	route := config.SocatRouteConfig{
+	route := config.JumpRouteConfig{
 		Context:   "test-context",
 		Namespace: "test-ns",
 		Via: config.ViaConfig{
@@ -183,7 +183,7 @@ func TestJumpHandler_discoverJumpPod_NoPodsFound(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset(svc)
 
-	route := config.SocatRouteConfig{
+	route := config.JumpRouteConfig{
 		Context:   "test-context",
 		Namespace: "test-ns",
 		Via: config.ViaConfig{
@@ -235,7 +235,7 @@ func TestJumpHandler_findReadyPod_SelectsReady(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset(readyPod, notReadyPod)
 
-	route := config.SocatRouteConfig{
+	route := config.JumpRouteConfig{
 		Namespace: "test-ns",
 		Via:       config.ViaConfig{Service: "svc"},
 	}
@@ -269,7 +269,7 @@ func TestJumpHandler_findReadyPod_FallbackToRunning(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset(runningPod)
 
-	route := config.SocatRouteConfig{
+	route := config.JumpRouteConfig{
 		Namespace: "test-ns",
 		Via:       config.ViaConfig{Service: "svc"},
 	}
@@ -319,7 +319,7 @@ func TestJumpHandler_buildForwardCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			route := config.SocatRouteConfig{
+			route := config.JumpRouteConfig{
 				Target: config.TargetConfig{
 					Host: tt.targetHost,
 					Port: tt.targetPort,
@@ -509,7 +509,7 @@ func TestConnReadWriter_OnlyOneCancelOnMultipleErrors(t *testing.T) {
 }
 
 func TestJumpHandler_HandleConnection_NoRestConfig(t *testing.T) {
-	route := config.SocatRouteConfig{
+	route := config.JumpRouteConfig{
 		Context:   "test-context",
 		Namespace: "test-ns",
 		Via: config.ViaConfig{
