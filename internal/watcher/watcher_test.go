@@ -3,30 +3,11 @@ package watcher
 import (
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/atas/autotunnel/internal/config"
 )
-
-// mockConfigUpdater implements ConfigUpdater for testing
-type mockConfigUpdater struct {
-	mu     sync.RWMutex
-	config *config.Config
-}
-
-func (m *mockConfigUpdater) UpdateConfig(newConfig *config.Config) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.config = newConfig
-}
-
-func (m *mockConfigUpdater) getConfig() *config.Config {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.config
-}
 
 // TestConfigWatcher_DetectsFileChanges verifies the watcher detects config file changes
 func TestConfigWatcher_DetectsFileChanges(t *testing.T) {
@@ -57,11 +38,8 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Create a mock manager that tracks UpdateConfig calls
-	manager := &mockConfigUpdater{config: cfg}
-
 	// Create watcher
-	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
+	watcher, err := NewConfigWatcher(configPath, cfg, false)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
@@ -89,16 +67,21 @@ http:
 		t.Fatalf("Failed to write updated config: %v", err)
 	}
 
-	// Wait for debounce (500ms) + processing
-	time.Sleep(800 * time.Millisecond)
+	// Wait for reload signal
+	select {
+	case <-watcher.ReloadChan:
+		// Success - reload was triggered
+	case <-time.After(2 * time.Second):
+		t.Error("Expected reload signal not received")
+	}
 
-	// Verify manager has updated routes
-	currentCfg := manager.getConfig()
+	// Verify watcher has updated config
+	currentCfg := watcher.GetConfig()
 	_, hasUpdatedRoute := currentCfg.HTTP.K8s.Routes["updated.localhost"]
 	_, hasOldRoute := currentCfg.HTTP.K8s.Routes["test.localhost"]
 
 	if !hasUpdatedRoute {
-		t.Error("Expected manager config to have 'updated.localhost' route after reload")
+		t.Error("Expected watcher config to have 'updated.localhost' route after reload")
 	}
 
 	if hasOldRoute {
@@ -133,9 +116,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &mockConfigUpdater{config: cfg}
-
-	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
+	watcher, err := NewConfigWatcher(configPath, cfg, false)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
@@ -168,16 +149,21 @@ http:
 		t.Fatalf("Failed to rename config: %v", err)
 	}
 
-	// Wait for debounce + re-watch delay (100ms) + processing
-	time.Sleep(1000 * time.Millisecond)
+	// Wait for reload signal
+	select {
+	case <-watcher.ReloadChan:
+		// Success - reload was triggered
+	case <-time.After(2 * time.Second):
+		t.Error("Expected reload signal not received after atomic rename")
+	}
 
 	// Verify updated route
-	currentCfg := manager.getConfig()
+	currentCfg := watcher.GetConfig()
 	_, hasAtomicRoute := currentCfg.HTTP.K8s.Routes["atomic.localhost"]
 	_, hasInitialRoute := currentCfg.HTTP.K8s.Routes["initial.localhost"]
 
 	if !hasAtomicRoute {
-		t.Error("Expected manager config to have 'atomic.localhost' route after atomic rename")
+		t.Error("Expected watcher config to have 'atomic.localhost' route after atomic rename")
 	}
 
 	if hasInitialRoute {
@@ -212,9 +198,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &mockConfigUpdater{config: cfg}
-
-	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
+	watcher, err := NewConfigWatcher(configPath, cfg, false)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
@@ -239,11 +223,16 @@ http:
 		t.Fatalf("Failed to write invalid config: %v", err)
 	}
 
-	// Wait for processing
-	time.Sleep(800 * time.Millisecond)
+	// Wait for processing - should NOT receive reload signal (invalid config rejected)
+	select {
+	case <-watcher.ReloadChan:
+		t.Error("Should NOT receive reload signal for invalid config")
+	case <-time.After(1 * time.Second):
+		// Expected - no reload signal for invalid config
+	}
 
 	// Original config should be preserved
-	currentCfg := manager.getConfig()
+	currentCfg := watcher.GetConfig()
 	_, hasValidRoute := currentCfg.HTTP.K8s.Routes["valid.localhost"]
 	_, hasBrokenRoute := currentCfg.HTTP.K8s.Routes["broken.localhost"]
 
@@ -282,9 +271,7 @@ http:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	manager := &mockConfigUpdater{config: cfg}
-
-	watcher, err := NewConfigWatcher(configPath, cfg, manager, false)
+	watcher, err := NewConfigWatcher(configPath, cfg, false)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
@@ -337,10 +324,8 @@ http:
 	// Simulate CLI --verbose flag
 	cfg.Verbose = true
 
-	manager := &mockConfigUpdater{config: cfg}
-
 	// Create watcher with cliVerbose=true (simulating --verbose flag was passed)
-	watcher, err := NewConfigWatcher(configPath, cfg, manager, true)
+	watcher, err := NewConfigWatcher(configPath, cfg, true)
 	if err != nil {
 		t.Fatalf("Failed to create watcher: %v", err)
 	}
@@ -367,11 +352,16 @@ http:
 		t.Fatalf("Failed to write updated config: %v", err)
 	}
 
-	// Wait for debounce + processing
-	time.Sleep(800 * time.Millisecond)
+	// Wait for reload signal
+	select {
+	case <-watcher.ReloadChan:
+		// Success - reload was triggered
+	case <-time.After(2 * time.Second):
+		t.Error("Expected reload signal not received")
+	}
 
 	// Verify that Verbose is still true (preserved from CLI flag)
-	currentCfg := manager.getConfig()
+	currentCfg := watcher.GetConfig()
 	if !currentCfg.Verbose {
 		t.Error("Expected Verbose to be true after reload (CLI flag should be preserved)")
 	}

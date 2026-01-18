@@ -98,43 +98,6 @@ func (m *Manager) Shutdown() {
 	log.Println("Tunnel manager stopped")
 }
 
-func (m *Manager) UpdateConfig(newConfig *config.Config) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	oldRoutes := m.config.HTTP.K8s.Routes
-	newRoutes := newConfig.HTTP.K8s.Routes
-
-	// tear down HTTP tunnels for routes that no longer exist
-	for hostname := range oldRoutes {
-		if _, exists := newRoutes[hostname]; !exists {
-			if tunnel, ok := m.tunnels[hostname]; ok {
-				log.Printf("Route removed, stopping tunnel: %s", hostname)
-				tunnel.Stop()
-				delete(m.tunnels, hostname)
-			}
-		}
-	}
-
-	// tear down TCP tunnels for routes that no longer exist
-	m.tcpTunnelsMu.Lock()
-	oldTCPRoutes := m.config.TCP.K8s.Routes
-	newTCPRoutes := newConfig.TCP.K8s.Routes
-	for port := range oldTCPRoutes {
-		if _, exists := newTCPRoutes[port]; !exists {
-			if tunnel, ok := m.tcpTunnels[port]; ok {
-				log.Printf("TCP route removed, stopping tunnel for port: %d", port)
-				tunnel.Stop()
-				delete(m.tcpTunnels, port)
-			}
-		}
-	}
-	m.tcpTunnelsMu.Unlock()
-
-	m.config = newConfig
-}
-
-
 // GetClientForContext is exposed so tcpserver's jump handler can reuse our k8s clients
 func (m *Manager) GetClientForContext(kubeconfigPaths []string, contextName string) (*kubernetes.Clientset, *rest.Config, error) {
 	return m.getClientsetAndConfig(kubeconfigPaths, contextName)

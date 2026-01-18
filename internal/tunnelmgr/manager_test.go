@@ -110,45 +110,6 @@ func testConfig(routes map[string]config.K8sRouteConfig) *config.Config {
 	}
 }
 
-func TestUpdateConfig_StopsRemovedRoutes(t *testing.T) {
-	// Setup: manager with one route and running tunnel
-	oldRoutes := map[string]config.K8sRouteConfig{
-		"old.localhost": {Context: "test", Namespace: "default", Service: "old", Port: 80},
-		"keep.localhost": {Context: "test", Namespace: "default", Service: "keep", Port: 80},
-	}
-	cfg := testConfig(oldRoutes)
-	m := NewManager(cfg)
-
-	// Inject mock tunnels
-	oldTunnel := newMockTunnel(true)
-	keepTunnel := newMockTunnel(true)
-	m.tunnels["old.localhost"] = oldTunnel
-	m.tunnels["keep.localhost"] = keepTunnel
-
-	// New config removes "old.localhost"
-	newRoutes := map[string]config.K8sRouteConfig{
-		"keep.localhost": {Context: "test", Namespace: "default", Service: "keep", Port: 80},
-	}
-	newCfg := testConfig(newRoutes)
-
-	// Act
-	m.UpdateConfig(newCfg)
-
-	// Assert
-	if !oldTunnel.wasStopped() {
-		t.Error("Expected old.localhost tunnel to be stopped")
-	}
-	if keepTunnel.wasStopped() {
-		t.Error("Expected keep.localhost tunnel to NOT be stopped")
-	}
-	if _, exists := m.tunnels["old.localhost"]; exists {
-		t.Error("Expected old.localhost to be removed from tunnels map")
-	}
-	if _, exists := m.tunnels["keep.localhost"]; !exists {
-		t.Error("Expected keep.localhost to remain in tunnels map")
-	}
-}
-
 func TestGetOrCreateTunnel_UnknownHostname(t *testing.T) {
 	cfg := testConfig(map[string]config.K8sRouteConfig{})
 	m := NewManager(cfg)
@@ -512,25 +473,3 @@ func TestManager_ActiveTunnels_MixedStates(t *testing.T) {
 	}
 }
 
-func TestManager_UpdateConfig_NoChanges(t *testing.T) {
-	routes := map[string]config.K8sRouteConfig{
-		"test.localhost": {Context: "test", Namespace: "default", Service: "test", Port: 80},
-	}
-	cfg := testConfig(routes)
-	m := NewManager(cfg)
-
-	// Add a running tunnel
-	runningTunnel := newMockTunnel(true)
-	m.tunnels["test.localhost"] = runningTunnel
-
-	// Update with same config
-	m.UpdateConfig(cfg)
-
-	// Tunnel should still be there and not stopped
-	if runningTunnel.wasStopped() {
-		t.Error("Tunnel should not be stopped when route remains")
-	}
-	if _, exists := m.tunnels["test.localhost"]; !exists {
-		t.Error("Tunnel should still exist")
-	}
-}

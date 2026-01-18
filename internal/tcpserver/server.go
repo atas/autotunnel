@@ -90,11 +90,24 @@ func (s *Server) startListener(port int, lt listenerType) error {
 	s.wg.Add(1)
 	go s.acceptLoop(pl)
 
-	typeStr := "route"
+	var destStr string
 	if lt == listenerTypeJump {
-		typeStr = "jump"
+		jumpCfg := s.config.TCP.K8s.Jump[port]
+		destStr = fmt.Sprintf("-> %s:%d via %s/%s (jump)",
+			jumpCfg.Target.Host, jumpCfg.Target.Port, jumpCfg.Namespace, jumpCfg.Via.Pod)
+		if jumpCfg.Via.Service != "" {
+			destStr = fmt.Sprintf("-> %s:%d via %s/svc/%s (jump)",
+				jumpCfg.Target.Host, jumpCfg.Target.Port, jumpCfg.Namespace, jumpCfg.Via.Service)
+		}
+	} else {
+		routeCfg := s.config.TCP.K8s.Routes[port]
+		if routeCfg.Service != "" {
+			destStr = fmt.Sprintf("-> %s/svc/%s:%d", routeCfg.Namespace, routeCfg.Service, routeCfg.Port)
+		} else {
+			destStr = fmt.Sprintf("-> %s/%s:%d", routeCfg.Namespace, routeCfg.Pod, routeCfg.Port)
+		}
 	}
-	log.Printf("TCP listener started on %s (%s)", addr, typeStr)
+	log.Printf("TCP listener started on %s %s", addr, destStr)
 	return nil
 }
 
@@ -227,60 +240,3 @@ func (s *Server) Shutdown() {
 	s.wg.Wait()
 }
 
-func (s *Server) UpdateConfig(newConfig *config.Config) {
-	oldRoutes := s.config.TCP.K8s.Routes
-	newRoutes := newConfig.TCP.K8s.Routes
-	oldJump := s.config.TCP.K8s.Jump
-	newJump := newConfig.TCP.K8s.Jump
-
-	// Stop listeners for removed route ports
-	s.mu.Lock()
-	for port := range oldRoutes {
-		if _, exists := newRoutes[port]; !exists {
-			if pl, ok := s.listeners[port]; ok {
-				log.Printf("TCP route port %d removed, stopping listener", port)
-				close(pl.stopChan)
-				pl.listener.Close()
-				delete(s.listeners, port)
-			}
-		}
-	}
-
-	// Stop listeners for removed jump ports
-	for port := range oldJump {
-		if _, exists := newJump[port]; !exists {
-			if pl, ok := s.listeners[port]; ok {
-				log.Printf("TCP jump port %d removed, stopping listener", port)
-				close(pl.stopChan)
-				pl.listener.Close()
-				delete(s.listeners, port)
-			}
-		}
-	}
-	s.mu.Unlock()
-
-	// Start listeners for new route ports
-	for port := range newRoutes {
-		if _, existed := oldRoutes[port]; !existed {
-			log.Printf("TCP route port %d added, starting listener", port)
-			if err := s.startListener(port, listenerTypeRoute); err != nil {
-				log.Printf("Failed to start TCP listener on port %d: %v", port, err)
-			}
-		}
-	}
-
-	// Start listeners for new jump ports
-	for port := range newJump {
-		if _, existed := oldJump[port]; !existed {
-			log.Printf("TCP jump port %d added, starting listener", port)
-			if err := s.startListener(port, listenerTypeJump); err != nil {
-				log.Printf("Failed to start TCP jump listener on port %d: %v", port, err)
-			}
-		}
-	}
-
-	s.mu.Lock()
-	s.config = newConfig
-	s.verbose = newConfig.Verbose
-	s.mu.Unlock()
-}
