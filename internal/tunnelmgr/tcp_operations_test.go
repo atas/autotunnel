@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/atas/autotunnel/internal/config"
+	"github.com/atas/autotunnel/internal/tunnel"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -69,7 +70,7 @@ func TestGetOrCreateTCPTunnel_ReturnsExistingRunning(t *testing.T) {
 	}
 }
 
-func TestGetOrCreateTCPTunnel_RemovesStaleTunnel(t *testing.T) {
+func TestGetOrCreateTCPTunnel_RemovesFailedTunnel(t *testing.T) {
 	tcpRoutes := map[int]config.TCPRouteConfig{
 		5432: {Context: "test", Namespace: "default", Service: "postgres", Port: 5432},
 	}
@@ -78,9 +79,10 @@ func TestGetOrCreateTCPTunnel_RemovesStaleTunnel(t *testing.T) {
 	cfg.HTTP.K8s.ResolvedKubeconfigs = []string{"/fake/kubeconfig"}
 	m := NewManager(cfg)
 
-	// Inject a stopped mock tunnel
-	stoppedTunnel := newMockTunnel(false) // not running
-	m.tcpTunnels[5432] = stoppedTunnel
+	// Inject a failed mock tunnel (should be replaced)
+	failedTunnel := newMockTunnel(false)
+	failedTunnel.state = tunnel.StateFailed // Failed state should trigger replacement
+	m.tcpTunnels[5432] = failedTunnel
 
 	// Set up factory to return a new mock
 	factoryCalled := false

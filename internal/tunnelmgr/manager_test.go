@@ -150,16 +150,17 @@ func TestGetOrCreateTunnel_ReturnsExistingRunning(t *testing.T) {
 	}
 }
 
-func TestGetOrCreateTunnel_RemovesStoppedTunnel(t *testing.T) {
+func TestGetOrCreateTunnel_RemovesFailedTunnel(t *testing.T) {
 	routes := map[string]config.K8sRouteConfig{
 		"test.localhost": {Context: "test", Namespace: "default", Service: "test", Port: 80},
 	}
 	cfg := testConfig(routes)
 	m := NewManager(cfg)
 
-	// Inject a stopped mock tunnel
-	stoppedTunnel := newMockTunnel(false) // not running
-	m.tunnels["test.localhost"] = stoppedTunnel
+	// Inject a failed mock tunnel (should be replaced)
+	failedTunnel := newMockTunnel(false)
+	failedTunnel.state = tunnel.StateFailed // Failed state should trigger replacement
+	m.tunnels["test.localhost"] = failedTunnel
 
 	// Set up factory to return a new mock - factory receives nil k8s clients in this test
 	factoryCalled := false
