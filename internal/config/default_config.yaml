@@ -107,7 +107,7 @@ tcp:
     # Jump-host routes via kubectl exec + socat/nc
     # Use this to connect to VPC-internal services (RDS, Cloud SQL, etc.)
     # through a jump pod that has network access to those services.
-    # Requires socat or nc (netcat) installed in the jump pod.
+    # ! NEED socat or nc (netcat) installed in the jump pod.
     jump:
       # # AWS RDS MySQL: connect via localhost:3306 -> jump pod -> RDS
       # 3306: # local port
