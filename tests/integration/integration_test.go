@@ -2695,6 +2695,7 @@ func TestConfigHotReload(t *testing.T) {
 	}
 
 	// Create initial config with auto_reload_config enabled
+	// Use nginx service for both routes (just different hostnames) to ensure backend works
 	initialConfig := fmt.Sprintf(`apiVersion: autotunnel/v1
 verbose: true
 auto_reload_config: true
@@ -2747,10 +2748,10 @@ http:
 		}
 	})
 
-	// Test 2: Request to non-existent route (echo) should fail with 502
+	// Test 2: Request to non-existent route (nginx2) should fail with 502
 	t.Run("new route not yet configured", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "http://"+proxyAddr+"/", nil)
-		req.Host = "echo.localhost"
+		req.Host = "nginx2.localhost"
 
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
@@ -2764,7 +2765,7 @@ http:
 		}
 	})
 
-	// Update config to add a new route
+	// Update config to add a new route (same nginx service, different hostname)
 	updatedConfig := fmt.Sprintf(`apiVersion: autotunnel/v1
 verbose: true
 auto_reload_config: true
@@ -2779,10 +2780,10 @@ http:
         namespace: autotunnel-test
         service: nginx
         port: 80
-      echo.localhost:
+      nginx2.localhost:
         context: %s
         namespace: autotunnel-test
-        service: echo
+        service: nginx
         port: 80
 `, idleTimeout, kubeconfig, getTestContext(), getTestContext())
 
@@ -2794,10 +2795,10 @@ http:
 	// Wait for hot-reload to detect the change (debounce is 500ms, plus some buffer)
 	time.Sleep(2 * time.Second)
 
-	// Test 3: Request to new route (echo) should now work
+	// Test 3: Request to new route (nginx2) should now work after reload
 	t.Run("new route works after reload", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "http://"+proxyAddr+"/", nil)
-		req.Host = "echo.localhost"
+		req.Host = "nginx2.localhost"
 
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
