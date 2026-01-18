@@ -33,21 +33,28 @@ sequenceDiagram
     Note over mgr: Starts idle cleanup loop
 
     alt auto_reload_config enabled
-        main->>watch: NewConfigWatcher(path, cfg, manager)
+        main->>watch: NewConfigWatcher(path, cfg, cliVerbose)
         watch-->>main: *ConfigWatcher
         main->>watch: Start()
-        main->>watch: SetTCPServer(tcpServer)
     end
 
-    main->>http: Start() [goroutine]
-    Note over http: Listens on :8989
+    loop Main run loop
+        main->>http: Start() [goroutine]
+        Note over http: Listens on :8989
 
-    alt TCP server exists
-        main->>tcp: Start()
-        Note over tcp: Starts port listeners
+        alt TCP server exists
+            main->>tcp: Start()
+            Note over tcp: Starts port listeners
+        end
+
+        main->>main: Wait for signal or reload
+        alt SIGINT/SIGTERM received
+            main->>main: Shutdown and exit loop
+        else Config file changed
+            main->>main: Shutdown all components
+            main->>main: Continue loop (restart)
+        end
     end
-
-    main->>main: Wait for SIGINT/SIGTERM
 ```
 
 ### Request Flow (HTTP)
@@ -115,27 +122,32 @@ sequenceDiagram
 
 ### Config Reload Flow
 
+The config reload mechanism uses a full-restart approach for simplicity:
+
 ```mermaid
 sequenceDiagram
     participant fs as Filesystem
     participant watch as watcher
     participant cfg as config
-    participant mgr as tunnelmgr
-    participant tcp as tcpserver
+    participant main as main.go
 
     fs->>watch: File change event
     Note over watch: Debounce 500ms
 
     watch->>cfg: LoadConfig(path)
-    cfg-->>watch: *Config (new)
+    cfg-->>watch: *Config (validated)
 
-    watch->>mgr: UpdateConfig(newConfig)
-    Note over mgr: Stop tunnels for removed routes
+    watch->>watch: Store new config
+    watch->>main: Signal via ReloadChan
 
-    alt TCP server registered
-        watch->>tcp: UpdateConfig(newConfig)
-        Note over tcp: Stop/start listeners as needed
-    end
+    main->>main: Shutdown HTTP server
+    main->>main: Shutdown TCP server
+    main->>main: Shutdown tunnel manager
+    Note over main: Small delay for port release
+
+    main->>main: Reinitialize with new config
+    main->>main: Start all components
+    Note over main: Tunnels created on-demand
 ```
 
 ---
@@ -269,7 +281,7 @@ sequenceDiagram
 
 | File | Purpose |
 |------|---------|
-| `server.go` | `Server` struct, listener management, connection handling, `UpdateConfig()` |
+| `server.go` | `Server` struct, listener management, connection handling |
 | `jump_handler.go` | `JumpHandler` - kubectl exec + socat/nc for jump-host routing |
 | `types.go` | `Manager` interface for dependency injection |
 
@@ -385,7 +397,7 @@ sequenceDiagram
 
 | File | Purpose |
 |------|---------|
-| `manager.go` | `Manager` struct, `NewManager()`, `Start()`, `Shutdown()`, `UpdateConfig()` |
+| `manager.go` | `Manager` struct, `NewManager()`, `Start()`, `Shutdown()` |
 | `operations.go` | `GetOrCreateTunnel()`, `idleCleanupLoop()`, HTTP tunnel management |
 | `tcp_operations.go` | `GetOrCreateTCPTunnel()`, TCP tunnel management |
 | `k8s_client.go` | `getClientsetAndConfig()` - cached K8s client per context |
@@ -396,15 +408,14 @@ sequenceDiagram
 
 ### watcher
 
-Watches config file for changes and triggers hot reload.
+Watches config file for changes and signals main.go to restart.
 
 ```mermaid
 sequenceDiagram
     participant fs as Filesystem
     participant w as watcher.go
     participant cfg as config
-    participant mgr as Manager
-    participant tcp as TCPServer
+    participant main as main.go
 
     Note over w: NewConfigWatcher()
     w->>fs: fsnotify.Add(configPath)
@@ -423,13 +434,11 @@ sequenceDiagram
         w->>w: Debounce timer (500ms)
         w->>w: reloadConfig()
         w->>cfg: LoadConfig(path)
-        cfg-->>w: *Config (new)
+        cfg-->>w: *Config (validated)
 
-        w->>mgr: UpdateConfig(newConfig)
-
-        alt tcpServer registered
-            w->>tcp: UpdateConfig(newConfig)
-        end
+        w->>w: Store validated config
+        w->>main: Signal ReloadChan
+        Note over main: Triggers restart loop
     end
 
     Note over w: Stop()
@@ -439,7 +448,7 @@ sequenceDiagram
 
 | File | Purpose |
 |------|---------|
-| `watcher.go` | `ConfigWatcher` struct, fsnotify integration, debouncing, `reloadConfig()` |
+| `watcher.go` | `ConfigWatcher` struct, fsnotify integration, debouncing, `ReloadChan` signaling |
 
 ---
 
@@ -452,7 +461,7 @@ main.go
 │   └── tunnel      (depends on: config, k8s client-go)
 ├── httpserver      (depends on: config, tunnelmgr)
 ├── tcpserver       (depends on: config, tunnelmgr)
-└── watcher         (depends on: config, tunnelmgr, tcpserver)
+└── watcher         (depends on: config only, signals main.go via ReloadChan)
 ```
 
 ## State Machines
