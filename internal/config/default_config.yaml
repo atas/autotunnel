@@ -132,6 +132,7 @@ tcp:
       #     create:
       #       image: alpine/socat:latest   # Image must have socat or nc
       #       # command: ["sleep", "infinity"]  # Optional: custom idle command (default: ["sleep", "infinity"])
+      #       # timeout: 60s                    # Optional: pod readiness timeout (default: 60s)
       #   target:
       #     host: postgres.internal
       #     port: 5432

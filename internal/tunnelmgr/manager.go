@@ -59,6 +59,11 @@ func (m *Manager) Start() {
 	m.wg.Add(1)
 	go m.idleCleanupLoop()
 	fmt.Printf("Idle timeout: %v\n", m.config.HTTP.IdleTimeout)
+
+	// Print TCP idle timeout if different from HTTP
+	if m.config.TCP.IdleTimeout > 0 && m.config.TCP.IdleTimeout != m.config.HTTP.IdleTimeout {
+		fmt.Printf("TCP idle timeout: %v\n", m.config.TCP.IdleTimeout)
+	}
 }
 
 func (m *Manager) Shutdown() {

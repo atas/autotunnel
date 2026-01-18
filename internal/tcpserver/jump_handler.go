@@ -43,8 +43,6 @@ func NewJumpHandler(route config.JumpRouteConfig, kubeconfig []string, clientset
 
 // HandleConnection forwards a TCP connection through the jump pod using exec + socat/nc
 func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, localPort int) error {
-	defer conn.Close()
-
 	// Check for required restConfig
 	if h.restConfig == nil {
 		return fmt.Errorf("restConfig is nil, cannot create SPDY executor")
@@ -96,6 +94,7 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 	}
 
 	stderrReader, stderrWriter := io.Pipe()
+	defer stderrWriter.Close() // ensures cleanup even on panic
 
 	go func() {
 		defer stderrReader.Close()
@@ -131,8 +130,6 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 		Stdout: conn,
 		Stderr: stderrWriter,
 	})
-
-	stderrWriter.Close()
 
 	if err != nil {
 		// context cancellation is normal shutdown, not an error
@@ -235,6 +232,12 @@ func (h *JumpHandler) buildForwardCommand() (string, error) {
 	// defense-in-depth: validate host even though config validation should catch this
 	if !config.IsValidTargetHost(host) {
 		return "", fmt.Errorf("invalid target host %q: must be valid hostname or IP", host)
+	}
+
+	// Wrap IPv6 addresses in brackets for proper socat/nc syntax
+	// e.g., 2001:db8::1 becomes [2001:db8::1] to avoid ambiguity with port separator
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		host = "[" + host + "]"
 	}
 
 	// try socat first (handles binary better), fall back to nc
@@ -352,10 +355,12 @@ func isConnectionError(msg string) bool {
 
 // waitForPodReady polls until the pod is ready or timeout is reached
 func (h *JumpHandler) waitForPodReady(ctx context.Context, podName string) error {
-	const (
-		pollInterval = 1 * time.Second
-		timeout      = 60 * time.Second
-	)
+	const pollInterval = 1 * time.Second
+
+	timeout := 60 * time.Second // default
+	if h.route.Via.Create != nil && h.route.Via.Create.Timeout > 0 {
+		timeout = h.route.Via.Create.Timeout
+	}
 
 	deadline := time.Now().Add(timeout)
 	for {

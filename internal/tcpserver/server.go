@@ -188,6 +188,8 @@ func (s *Server) handleConnection(localPort int, conn net.Conn) {
 }
 
 func (s *Server) handleJumpConnection(localPort int, conn net.Conn) {
+	defer conn.Close()
+
 	s.mu.RLock()
 	route, exists := s.config.TCP.K8s.Jump[localPort]
 	kubeconfigs := s.config.TCP.K8s.ResolvedKubeconfigs
@@ -195,14 +197,12 @@ func (s *Server) handleJumpConnection(localPort int, conn net.Conn) {
 
 	if !exists {
 		log.Printf("[jump:%d] No route configured", localPort)
-		conn.Close()
 		return
 	}
 
 	clientset, restConfig, err := s.manager.GetClientForContext(kubeconfigs, route.Context)
 	if err != nil {
 		log.Printf("[jump:%d] Failed to get K8s client: %v", localPort, err)
-		conn.Close()
 		return
 	}
 

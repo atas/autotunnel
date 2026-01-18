@@ -73,8 +73,9 @@ type ViaConfig struct {
 
 // CreateConfig defines how to auto-create a jump pod if it doesn't exist
 type CreateConfig struct {
-	Image   string   `yaml:"image"`             // Required: container image (e.g., "alpine:3.19")
-	Command []string `yaml:"command,omitempty"` // Optional: pod command (default: ["sleep", "infinity"])
+	Image   string        `yaml:"image"`             // Required: container image (e.g., "alpine:3.19")
+	Command []string      `yaml:"command,omitempty"` // Optional: pod command (default: ["sleep", "infinity"])
+	Timeout time.Duration `yaml:"timeout,omitempty"` // Optional: pod readiness timeout (default: 60s)
 }
 
 type TargetConfig struct {

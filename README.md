@@ -343,10 +343,11 @@ tcp:
           create:
             image: alpine/socat:latest  # Auto-create pod with this image
             # command: ["sleep", "infinity"]  # Optional: custom idle command (default: ["sleep", "infinity"])
+            # timeout: 60s  # Optional: pod readiness timeout (default: 60s)
         target:
           host: 10.0.0.5            # VPC-internal IP
           port: 5432
-        method: socat               # Optional: "socat" (default) or "nc"
+        method: socat               # Optional: "socat" (default), nc is automatic fallback
 ```
 
 ### HTTP Route Options
@@ -391,10 +392,11 @@ Connect to VPC-internal services through a jump pod. Requires `socat` or `nc` in
 | `via.service`      | Service to discover jump pod from (mutually exclusive with `via.pod`) |
 | `via.pod`          | Direct jump pod name (mutually exclusive with `via.service`)          |
 | `via.container`    | Container name (optional, for multi-container pods)                   |
-| `via.create.image` | Image for auto-creating jump pod (requires `via.pod`)                 |
-| `target.host`      | Target hostname or IP (e.g., RDS endpoint)                            |
-| `target.port`      | Target port                                                           |
-| `method`           | `socat` (default) or `nc` - forwarding method in jump pod             |
+| `via.create.image`   | Image for auto-creating jump pod (requires `via.pod`)                 |
+| `via.create.timeout` | Pod readiness timeout (default: 60s)                                  |
+| `target.host`        | Target hostname or IP (e.g., RDS endpoint)                            |
+| `target.port`        | Target port                                                           |
+| `method`             | `socat` (default) - forwarding method in jump pod (nc is auto-fallback) |
 
 Auto-created pods have labels `app.kubernetes.io/managed-by: autotunnel`. Clean up with:
 ```bash
