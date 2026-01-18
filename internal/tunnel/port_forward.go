@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/atas/autotunnel/internal/k8sutil"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 )
@@ -43,9 +41,7 @@ func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port in
 		return t.config.Pod, port, nil
 	}
 
-	svc, err := t.clientset.CoreV1().Services(t.config.Namespace).Get(
-		ctx, t.config.Service, metav1.GetOptions{},
-	)
+	svc, err := k8sutil.GetService(ctx, t.clientset, t.config.Namespace, t.config.Service)
 	if err != nil {
 		t.setFailed(err)
 		return "", 0, fmt.Errorf("failed to get service: %w", err)
@@ -53,18 +49,7 @@ func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port in
 
 	// K8s services can map ports (e.g. service:80 -> container:8080),
 	// so we need to resolve to the actual container port
-	var targetPortName string
-	for _, p := range svc.Spec.Ports {
-		if int(p.Port) == t.config.Port {
-			if p.TargetPort.IntVal != 0 {
-				port = int(p.TargetPort.IntVal)
-			} else if p.TargetPort.StrVal != "" {
-				// named port - need the pod spec to resolve it
-				targetPortName = p.TargetPort.StrVal
-			}
-			break
-		}
-	}
+	port, targetPortName := k8sutil.ResolveServicePort(svc, t.config.Port)
 
 	targetPod, err := k8sutil.FindReadyPod(ctx, t.clientset, t.config.Namespace, svc.Spec.Selector, t.config.Service)
 	if err != nil {
@@ -73,8 +58,9 @@ func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port in
 	}
 
 	if targetPortName != "" {
-		port, err = t.resolveNamedPort(targetPod, targetPortName)
+		port, err = k8sutil.ResolveNamedPort(targetPod, targetPortName)
 		if err != nil {
+			t.setFailed(err)
 			return "", 0, err
 		}
 	}
@@ -86,19 +72,6 @@ func (t *Tunnel) discoverTargetPod(ctx context.Context) (podName string, port in
 	return targetPod.Name, port, nil
 }
 
-func (t *Tunnel) resolveNamedPort(pod *corev1.Pod, portName string) (int, error) {
-	for _, container := range pod.Spec.Containers {
-		for _, port := range container.Ports {
-			if port.Name == portName {
-				return int(port.ContainerPort), nil
-			}
-		}
-	}
-
-	err := fmt.Errorf("could not resolve named port %q in pod %s", portName, pod.Name)
-	t.setFailed(err)
-	return 0, err
-}
 
 func (t *Tunnel) createPortForwarder(podName string, targetPort int) (*portforward.PortForwarder, chan error, error) {
 	req := t.clientset.CoreV1().RESTClient().Post().

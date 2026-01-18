@@ -29,7 +29,7 @@ func (m *Manager) GetOrCreateTCPTunnel(localPort int) (TunnelHandle, error) {
 		kubeconfigs = m.config.HTTP.K8s.ResolvedKubeconfigs
 	}
 
-	clientset, restConfig, err := m.getClientsetAndConfig(kubeconfigs, routeConfig.Context)
+	clientset, restConfig, err := m.clientFactory.GetClientForContext(kubeconfigs, routeConfig.Context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s client for context %s: %w", routeConfig.Context, err)
 	}

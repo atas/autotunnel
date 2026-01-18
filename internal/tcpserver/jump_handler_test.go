@@ -815,7 +815,7 @@ func TestJumpHandler_buildJumpPodSpec_CustomCommand(t *testing.T) {
 	}
 }
 
-func TestJumpHandler_waitForPodReady_Timeout(t *testing.T) {
+func TestWaitForPodReady_Timeout(t *testing.T) {
 	// Create a pod that never becomes ready
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -832,26 +832,14 @@ func TestJumpHandler_waitForPodReady_Timeout(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset(pod)
 
-	route := config.JumpRouteConfig{
-		Namespace: "test-ns",
-		Via: config.ViaConfig{
-			Pod: "autotunnel-jump",
-		},
-	}
-
-	handler := NewJumpHandler(route, nil, clientset, nil, false)
-
 	// Use a short timeout for testing
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	err := handler.waitForPodReady(ctx, "autotunnel-jump")
+	err := k8sutil.WaitForPodReady(context.Background(), clientset, "test-ns", "autotunnel-jump", 100*time.Millisecond)
 	if err == nil {
 		t.Error("expected timeout error, got nil")
 	}
 }
 
-func TestJumpHandler_waitForPodReady_PodFailed(t *testing.T) {
+func TestWaitForPodReady_PodFailed(t *testing.T) {
 	// Create a pod that fails
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -865,16 +853,7 @@ func TestJumpHandler_waitForPodReady_PodFailed(t *testing.T) {
 
 	clientset := fake.NewSimpleClientset(pod)
 
-	route := config.JumpRouteConfig{
-		Namespace: "test-ns",
-		Via: config.ViaConfig{
-			Pod: "autotunnel-jump",
-		},
-	}
-
-	handler := NewJumpHandler(route, nil, clientset, nil, false)
-
-	err := handler.waitForPodReady(context.Background(), "autotunnel-jump")
+	err := k8sutil.WaitForPodReady(context.Background(), clientset, "test-ns", "autotunnel-jump", 5*time.Second)
 	if err == nil {
 		t.Error("expected error for failed pod, got nil")
 	}

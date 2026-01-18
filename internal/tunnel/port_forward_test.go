@@ -17,7 +17,6 @@ import (
 // ============================================================================
 
 func TestResolveNamedPort_Found(t *testing.T) {
-	tunnel := &Tunnel{}
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -32,17 +31,16 @@ func TestResolveNamedPort_Found(t *testing.T) {
 		},
 	}
 
-	port, err := tunnel.resolveNamedPort(pod, "http")
+	port, err := k8sutil.ResolveNamedPort(pod, "http")
 	if err != nil {
-		t.Fatalf("resolveNamedPort() error = %v", err)
+		t.Fatalf("ResolveNamedPort() error = %v", err)
 	}
 	if port != 8080 {
-		t.Errorf("resolveNamedPort() = %d, want 8080", port)
+		t.Errorf("ResolveNamedPort() = %d, want 8080", port)
 	}
 }
 
 func TestResolveNamedPort_NotFound(t *testing.T) {
-	tunnel := &Tunnel{}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
 		Spec: corev1.PodSpec{
@@ -57,14 +55,13 @@ func TestResolveNamedPort_NotFound(t *testing.T) {
 		},
 	}
 
-	_, err := tunnel.resolveNamedPort(pod, "nonexistent")
+	_, err := k8sutil.ResolveNamedPort(pod, "nonexistent")
 	if err == nil {
-		t.Fatal("resolveNamedPort() expected error, got nil")
+		t.Fatal("ResolveNamedPort() expected error, got nil")
 	}
 }
 
 func TestResolveNamedPort_MultipleContainers(t *testing.T) {
-	tunnel := &Tunnel{}
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -85,26 +82,25 @@ func TestResolveNamedPort_MultipleContainers(t *testing.T) {
 	}
 
 	// Should find port in second container
-	port, err := tunnel.resolveNamedPort(pod, "http")
+	port, err := k8sutil.ResolveNamedPort(pod, "http")
 	if err != nil {
-		t.Fatalf("resolveNamedPort() error = %v", err)
+		t.Fatalf("ResolveNamedPort() error = %v", err)
 	}
 	if port != 8080 {
-		t.Errorf("resolveNamedPort() = %d, want 8080", port)
+		t.Errorf("ResolveNamedPort() = %d, want 8080", port)
 	}
 
 	// Should find port in first container
-	port, err = tunnel.resolveNamedPort(pod, "proxy")
+	port, err = k8sutil.ResolveNamedPort(pod, "proxy")
 	if err != nil {
-		t.Fatalf("resolveNamedPort() error = %v", err)
+		t.Fatalf("ResolveNamedPort() error = %v", err)
 	}
 	if port != 15000 {
-		t.Errorf("resolveNamedPort() = %d, want 15000", port)
+		t.Errorf("ResolveNamedPort() = %d, want 15000", port)
 	}
 }
 
 func TestResolveNamedPort_EmptyContainers(t *testing.T) {
-	tunnel := &Tunnel{}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "empty-pod"},
 		Spec: corev1.PodSpec{
@@ -112,9 +108,9 @@ func TestResolveNamedPort_EmptyContainers(t *testing.T) {
 		},
 	}
 
-	_, err := tunnel.resolveNamedPort(pod, "http")
+	_, err := k8sutil.ResolveNamedPort(pod, "http")
 	if err == nil {
-		t.Fatal("resolveNamedPort() expected error for empty containers")
+		t.Fatal("ResolveNamedPort() expected error for empty containers")
 	}
 }
 

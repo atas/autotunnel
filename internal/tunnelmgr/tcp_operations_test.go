@@ -93,10 +93,7 @@ func TestGetOrCreateTCPTunnel_RemovesStaleTunnel(t *testing.T) {
 	}
 
 	// Pre-populate k8s client cache
-	m.k8sClients["test"] = &k8sClient{
-		clientset:  nil,
-		restConfig: nil,
-	}
+	m.ClientFactory().InjectClient("test", nil, nil)
 
 	// Act
 	result, err := m.GetOrCreateTCPTunnel(5432)
@@ -137,10 +134,7 @@ func TestGetOrCreateTCPTunnel_FallsBackToHTTPKubeconfig(t *testing.T) {
 	}
 
 	// Pre-populate k8s client cache
-	m.k8sClients["test"] = &k8sClient{
-		clientset:  nil,
-		restConfig: nil,
-	}
+	m.ClientFactory().InjectClient("test", nil, nil)
 
 	// Act
 	_, err := m.GetOrCreateTCPTunnel(5432)
