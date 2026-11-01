@@ -1,0 +1,35 @@
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: >-
+      github.repository == 'atas/autotunnel' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.actor == 'dependabot[bot]'
+    steps:
+      - name: Approve and enable auto-merge for Go dependency updates
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # go.mod and go.sum have no code owner (see .github/CODEOWNERS), so
+          # this approval is enough for them. Any other file, such as a workflow
+          # in a GitHub Actions bump, still needs a code owner to approve.
+          go_files_only=$(gh pr view "$PR_URL" --json files \
+            --jq '.files | length > 0 and all(.path == "go.mod" or .path == "go.sum")')
+
+          if [ "$go_files_only" != "true" ]; then
+            echo "PR changes files other than go.mod/go.sum; leaving it for manual review."
+            exit 0
+          fi
+
+          gh pr review "$PR_URL" --approve
+          # Merges once the required checks (check, integration) pass.
+          gh pr merge "$PR_URL" --auto --squash

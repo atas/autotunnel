@@ -1,2 +1,7 @@
 # Default owner for everything in the repo
 * @atas
+
+# No code owner: Dependabot's Go updates can merge on the approval given by
+# .github/workflows/dependabot-auto-merge.yml.
+/go.mod
+/go.sum
