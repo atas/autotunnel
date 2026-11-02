@@ -86,22 +86,21 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, host strin
 		Host:   fmt.Sprintf("127.0.0.1:%d", tun.LocalPort()),
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(targetURL)
+			pr.Out.Host = pr.In.Host
+			// Rewrite strips query parameters Go can't parse, such as ones using
+			// ";". Keep the original string so the backend sees what the client sent.
+			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
+			pr.SetXForwarded()
+			pr.Out.Header.Set("X-Forwarded-Proto", scheme)
+		},
+	}
 
 	if scheme == "https" {
 		proxy.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	}
-
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = r.Host
-		req.Header.Set("X-Forwarded-Proto", scheme)
-		req.Header.Set("X-Forwarded-Host", r.Host)
-		if r.RemoteAddr != "" {
-			req.Header.Set("X-Forwarded-For", strings.Split(r.RemoteAddr, ":")[0])
 		}
 	}
 
