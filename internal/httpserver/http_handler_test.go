@@ -371,6 +371,61 @@ func TestServer_ServeHTTP_XForwardedHeaders(t *testing.T) {
 	}
 }
 
+func TestServer_ServeHTTP_ForwardsClientDetails(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		spoofedFor string
+		wantFor    string
+	}{
+		{name: "IPv4 client", remoteAddr: "192.168.1.100:54321", wantFor: "192.168.1.100"},
+		{name: "IPv6 client", remoteAddr: "[2001:db8::1]:54321", wantFor: "2001:db8::1"},
+		{name: "client-supplied value is dropped", remoteAddr: "192.168.1.100:54321", spoofedFor: "10.0.0.1", wantFor: "192.168.1.100"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var receivedFor []string
+			var receivedQuery string
+
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				receivedFor = r.Header.Values("X-Forwarded-For")
+				receivedQuery = r.URL.RawQuery
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer backend.Close()
+
+			mockTun := &mockTunnel{
+				running:   true,
+				localPort: backend.Listener.Addr().(*net.TCPAddr).Port,
+				scheme:    "http",
+			}
+			server := NewServer(testHTTPConfig(), &mockManager{tunnel: mockTun})
+
+			const query = "a=1;b=2&c=%zz"
+			req := httptest.NewRequest("GET", "/?"+query, nil)
+			req.Host = "test.localhost"
+			req.RemoteAddr = tt.remoteAddr
+			if tt.spoofedFor != "" {
+				req.Header.Set("X-Forwarded-For", tt.spoofedFor)
+			}
+
+			w := httptest.NewRecorder()
+			server.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("Expected 200, got %d", w.Code)
+			}
+			if len(receivedFor) != 1 || receivedFor[0] != tt.wantFor {
+				t.Errorf("X-Forwarded-For: expected [%q], got %q", tt.wantFor, receivedFor)
+			}
+			if receivedQuery != query {
+				t.Errorf("Query: expected %q, got %q", query, receivedQuery)
+			}
+		})
+	}
+}
+
 func TestServer_ServeHTTP_HTTPSchemeDefault(t *testing.T) {
 	var receivedProto string
 
