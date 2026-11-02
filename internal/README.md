@@ -289,13 +289,14 @@ sequenceDiagram
 
 ### tunnel
 
-Individual port-forward tunnel using client-go SPDY.
+Individual port-forward tunnel using client-go SPDY. Uses `k8sutil` for pod/service resolution.
 
 ```mermaid
 sequenceDiagram
     participant caller as Caller
     participant tun as tunnel.go
     participant pf as port_forward.go
+    participant k8sutil as k8sutil
     participant ops as operations.go
     participant k8s as Kubernetes API
 
@@ -303,15 +304,26 @@ sequenceDiagram
     tun-->>caller: *Tunnel (StateIdle)
 
     caller->>tun: Start(ctx)
-    tun->>tun: state = StateStarting
-    tun->>pf: startPortForward()
+    alt StateRunning
+        tun-->>caller: nil (already running)
+    else StateStarting
+        tun->>tun: awaitReady(ctx)
+        Note over tun: Wait for concurrent Start()
+    else StateIdle
+        tun->>tun: state = StateStarting
+        tun->>pf: startPortForward()
+    end
 
     pf->>pf: discoverTargetPod()
     alt Service configured
-        pf->>k8s: Get Service
-        pf->>pf: Resolve port mapping
-        pf->>k8s: List Pods (label selector)
-        pf->>pf: findReadyPod()
+        pf->>k8sutil: GetService()
+        k8sutil->>k8s: Get Service
+        pf->>k8sutil: ResolveServicePort()
+        pf->>k8sutil: FindReadyPod()
+        k8sutil->>k8s: List Pods (selector)
+        alt Named port
+            pf->>k8sutil: ResolveNamedPort()
+        end
     else Pod configured
         pf->>pf: Use pod name directly
     end
@@ -325,6 +337,7 @@ sequenceDiagram
         pf->>pf: monitorErrors() [goroutine]
     else Error/Timeout
         pf->>tun: state = StateFailed
+        pf->>tun: lastError = err
     end
 
     caller->>ops: Touch()
@@ -340,15 +353,15 @@ sequenceDiagram
 
 | File | Purpose |
 |------|---------|
-| `tunnel.go` | `Tunnel` struct, state machine (`Idle`→`Starting`→`Running`→`Stopping`), `Start()`/`Stop()` |
-| `port_forward.go` | `discoverTargetPod()`, `createPortForwarder()`, `waitForReady()`, pod/service resolution |
+| `tunnel.go` | `Tunnel` struct, state machine, `Start()`/`Stop()`/`awaitReady()` |
+| `port_forward.go` | `discoverTargetPod()`, `createPortForwarder()`, `waitForReady()` - uses `k8sutil` for resolution |
 | `operations.go` | `Touch()`, `IdleDuration()`, `LocalPort()`, `Scheme()`, accessor methods |
 
 ---
 
 ### tunnelmgr
 
-Manages tunnel lifecycle, K8s client caching, and idle cleanup.
+Manages tunnel lifecycle and idle cleanup. Uses `k8sutil.ClientFactory` for K8s client caching.
 
 ```mermaid
 sequenceDiagram
@@ -356,11 +369,12 @@ sequenceDiagram
     participant mgr as manager.go
     participant ops as operations.go
     participant tcp_ops as tcp_operations.go
-    participant k8s as k8s_client.go
+    participant cf as k8sutil.ClientFactory
     participant dyn as dynamic_route.go
     participant tun as tunnel
 
     caller->>mgr: NewManager(cfg)
+    Note over mgr: Creates k8sutil.ClientFactory
     mgr-->>caller: *Manager
 
     caller->>mgr: Start()
@@ -372,14 +386,14 @@ sequenceDiagram
         ops->>dyn: ParseDynamicHostname()
         dyn-->>ops: Resolved route or nil
     end
-    ops->>k8s: getClientsetAndConfig()
-    k8s-->>ops: clientset, restConfig
+    ops->>cf: GetClientForContext(paths, ctx)
+    cf-->>ops: clientset, restConfig
     ops->>tun: tunnelFactory(...)
     ops-->>caller: TunnelHandle
 
     caller->>tcp_ops: GetOrCreateTCPTunnel(port)
     tcp_ops->>tcp_ops: Check tcpTunnels map
-    tcp_ops->>k8s: getClientsetAndConfig()
+    tcp_ops->>cf: GetClientForContext(paths, ctx)
     tcp_ops->>tun: tunnelFactory(...)
     tcp_ops-->>caller: TunnelHandle
 
@@ -392,15 +406,14 @@ sequenceDiagram
 
     caller->>mgr: Shutdown()
     mgr->>mgr: Stop all tunnels
-    mgr->>mgr: Clear k8s clients
+    mgr->>cf: Clear()
 ```
 
 | File | Purpose |
 |------|---------|
-| `manager.go` | `Manager` struct, `NewManager()`, `Start()`, `Shutdown()` |
+| `manager.go` | `Manager` struct, `NewManager()`, `Start()`, `Shutdown()`, owns `k8sutil.ClientFactory` |
 | `operations.go` | `GetOrCreateTunnel()`, `idleCleanupLoop()`, HTTP tunnel management |
 | `tcp_operations.go` | `GetOrCreateTCPTunnel()`, TCP tunnel management |
-| `k8s_client.go` | `getClientsetAndConfig()` - cached K8s client per context |
 | `dynamic_route.go` | `ParseDynamicHostname()` - pattern-based route resolution |
 | `types.go` | `TunnelHandle` interface, `TunnelFactory` type |
 
@@ -452,15 +465,79 @@ sequenceDiagram
 
 ---
 
+### k8sutil
+
+Shared Kubernetes client utilities extracted from tunnelmgr for reuse.
+
+```mermaid
+sequenceDiagram
+    participant caller as Caller
+    participant cf as ClientFactory
+    participant client as client.go
+    participant pod as pod.go
+    participant svc as service.go
+    participant k8s as Kubernetes API
+
+    caller->>cf: GetClientForContext(paths, ctx)
+    cf->>cf: Check cache
+    alt Cached
+        cf-->>caller: clientset, restConfig
+    else Not cached
+        cf->>k8s: Build REST config
+        cf->>k8s: Create clientset
+        cf->>cf: Cache client
+        cf-->>caller: clientset, restConfig
+    end
+
+    caller->>svc: GetService(ctx, clientset, ns, name)
+    svc->>k8s: Get Service
+    svc-->>caller: *Service
+
+    caller->>svc: ResolveServicePort(svc, port)
+    svc-->>caller: targetPort, portName
+
+    caller->>pod: FindReadyPod(ctx, clientset, ns, labels, svc)
+    pod->>k8s: List Pods (selector, Running)
+    pod->>pod: Find first ready pod
+    pod-->>caller: *Pod
+
+    caller->>pod: WaitForPodReady(ctx, clientset, ns, name, timeout)
+    loop Poll until ready
+        pod->>k8s: Get Pod
+        pod->>pod: Check Ready condition
+    end
+    pod-->>caller: nil or error
+```
+
+| File | Purpose |
+|------|---------|
+| `client.go` | `ClientFactory` - caches Kubernetes clients per context |
+| `pod.go` | `FindReadyPod()`, `WaitForPodReady()` - pod discovery utilities |
+| `service.go` | `GetService()`, `ResolveServicePort()`, `ResolveNamedPort()` - service utilities |
+
+---
+
+### netutil
+
+Shared network utilities for connection handling.
+
+| File | Purpose |
+|------|---------|
+| `copy.go` | `BidirectionalCopy()` - copies data between two connections with proper TCP half-close handling |
+
+---
+
 ## Dependency Graph
 
 ```
 main.go
 ├── config          (loaded first, no internal deps)
-├── tunnelmgr       (depends on: config, tunnel)
-│   └── tunnel      (depends on: config, k8s client-go)
-├── httpserver      (depends on: config, tunnelmgr)
-├── tcpserver       (depends on: config, tunnelmgr)
+├── k8sutil         (depends on: k8s client-go)
+├── netutil         (no dependencies)
+├── tunnelmgr       (depends on: config, tunnel, k8sutil)
+│   └── tunnel      (depends on: config, k8sutil)
+├── httpserver      (depends on: config, tunnelmgr, netutil)
+├── tcpserver       (depends on: config, tunnelmgr, k8sutil, netutil)
 └── watcher         (depends on: config only, signals main.go via ReloadChan)
 ```
 
@@ -478,17 +555,37 @@ main.go
     │Starting │──────────────────┤
     └────┬────┘   timeout/fail   │
          │                       │
-         │ ready                 │
-         ▼                       │
-    ┌─────────┐                  │
-    │ Running │──────────────────┤
-    └────┬────┘   Stop()         │
-         │                       │
-         ▼                       │
-    ┌─────────┐                  │
-    │Stopping │──────────────────┘
-    └─────────┘
+    ┌────┴────┐                  │
+    │         │                  │
+    ▼         ▼                  │
+ ready     error                 │
+    │         │                  │
+    ▼         ▼                  │
+┌───────┐ ┌────────┐             │
+│Running│ │ Failed │─────────────┤
+└───┬───┘ └────────┘             │
+    │         ▲                  │
+    │ Stop()  │ error            │
+    ▼         │                  │
+┌─────────┐   │                  │
+│Stopping │───┴──────────────────┘
+└─────────┘
 ```
+
+**Concurrent Start() Handling:**
+
+When multiple goroutines call `Start()` concurrently:
+1. First caller transitions from `Idle` → `Starting` and performs startup
+2. Subsequent callers see `StateStarting` and call `awaitReady()`
+3. `awaitReady()` polls state every 100ms until:
+   - `StateRunning`: returns success
+   - `StateFailed`: returns the stored error
+   - `StateIdle`: retries `Start()` (first caller failed, cleaned up)
+
+**State Preservation:**
+
+The manager only removes tunnels from its map when they are in `StateFailed` or `StateStopping`.
+Tunnels in `StateStarting`, `StateIdle`, or `StateRunning` are preserved to handle concurrent access.
 
 ### Connection Routing
 

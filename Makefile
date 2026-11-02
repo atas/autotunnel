@@ -39,8 +39,8 @@ test-all: test test-integration-local ## Run all tests (unit + integration via D
 
 ## Development
 
-run: build ## Build and run with example config
-	./$(BINARY_NAME) --config example-config.yaml --verbose
+run: build ## Build and run with your config (~/.autotunnel.yaml)
+	./$(BINARY_NAME) --verbose
 
 vet: ## Run go vet
 	go vet ./...
