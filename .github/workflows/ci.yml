@@ -16,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.5"
+          go-version-file: go.mod
 
       - name: Check go mod tidy
         run: |
@@ -44,7 +44,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25.5"
+          go-version-file: go.mod
 
       - name: Create KIND cluster
         uses: helm/kind-action@v1
