@@ -45,6 +45,8 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorRouteNotFound, fmt.Sprintf("No service configured for host: %s", sni))
 		return
 	}
+	tunnel.Acquire()
+	defer tunnel.Release()
 
 	if !tunnel.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), TLSTunnelStartTimeout)

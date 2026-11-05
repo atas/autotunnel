@@ -139,6 +139,8 @@ func (s *Server) handleConnection(localPort int, conn net.Conn) {
 		log.Printf("[tcp:%d] Failed to get tunnel: %v", localPort, err)
 		return
 	}
+	tunnel.Acquire()
+	defer tunnel.Release()
 
 	// Ensure tunnel is started
 	if !tunnel.IsRunning() {
@@ -213,4 +215,3 @@ func (s *Server) Shutdown() {
 
 	s.wg.Wait()
 }
-

@@ -14,6 +14,9 @@ type TunnelHandle interface {
 	LocalPort() int
 	Scheme() string
 	Touch()
+	Acquire()
+	Release()
+	ActiveConns() int
 	IdleDuration() time.Duration
 	State() tunnel.State
 	LastError() error

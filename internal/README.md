@@ -355,7 +355,7 @@ sequenceDiagram
 |------|---------|
 | `tunnel.go` | `Tunnel` struct, state machine, `Start()`/`Stop()`/`awaitReady()` |
 | `port_forward.go` | `discoverTargetPod()`, `createPortForwarder()`, `waitForReady()` - uses `k8sutil` for resolution |
-| `operations.go` | `Touch()`, `IdleDuration()`, `LocalPort()`, `Scheme()`, accessor methods |
+| `operations.go` | `Touch()`, `Acquire()`, `Release()`, `IdleDuration()`, `LocalPort()`, `Scheme()`, accessor methods |
 
 ---
 
@@ -401,7 +401,7 @@ sequenceDiagram
         ops->>ops: cleanupIdleTunnels()
         ops->>ops: Check HTTP tunnels
         ops->>ops: Check TCP tunnels
-        Note over ops: Stop tunnels exceeding idle_timeout
+        Note over ops: Stop tunnels past idle_timeout with no active connections
     end
 
     caller->>mgr: Shutdown()
@@ -562,7 +562,7 @@ main.go
     │         │                  │
     ▼         ▼                  │
 ┌───────┐ ┌────────┐             │
-│Running│ │ Failed │─────────────┤
+│Running│ │ Failed │             │
 └───┬───┘ └────────┘             │
     │         ▲                  │
     │ Stop()  │ error            │
@@ -581,6 +581,10 @@ When multiple goroutines call `Start()` concurrently:
    - `StateRunning`: returns success
    - `StateFailed`: returns the stored error
    - `StateIdle`: retries `Start()` (first caller failed, cleaned up)
+
+**Failed is final:**
+
+`Start()` on a failed tunnel returns an error. The manager replaces it on the next `GetOrCreateTunnel()`.
 
 **State Preservation:**
 

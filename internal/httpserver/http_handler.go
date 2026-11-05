@@ -115,6 +115,8 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, host strin
 		// whether to retry or report the error.
 	}
 
+	tun.Acquire()
+	defer tun.Release()
 	proxy.ServeHTTP(w, r)
 
 	return proxyErr
