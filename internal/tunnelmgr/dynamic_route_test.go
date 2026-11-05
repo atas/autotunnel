@@ -206,6 +206,44 @@ func TestParseDynamicHostname(t *testing.T) {
 			scheme:      "http",
 			wantOK:      false,
 		},
+		// Port aliases of one target must not parse, or each opens its own tunnel
+		{name: "invalid - port with leading zero", hostname: "nginx-080.svc.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - zero padded port", hostname: "nginx-0000000080.svc.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - port with plus sign", hostname: "nginx-+80.svc.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		// Names that Kubernetes could never have
+		{name: "invalid - uppercase service", hostname: "NGINX-80.svc.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - service with punctuation", hostname: "a_b!-80.svc.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - service with newline", hostname: "a\nFAKE LOG LINE-80.svc.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - service with dot", hostname: "a.b-80.svc.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - service ending in hyphen", hostname: "nginx--80.svc.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - pod with underscore", hostname: "a_b-80.pod.default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - uppercase namespace", hostname: "nginx-80.svc.Default.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - namespace with dot", hostname: "nginx-80.svc.a.b.ns.microk8s.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{name: "invalid - context with newline", hostname: "nginx-80.svc.default.ns.a\nFAKE LOG LINE.cx.k8s.localhost", dynamicHost: "k8s.localhost"},
+		{
+			name:        "valid pod - dotted name is a DNS-1123 subdomain",
+			hostname:    "web.a-80.pod.default.ns.microk8s.cx.k8s.localhost",
+			dynamicHost: "k8s.localhost",
+			scheme:      "http",
+			wantPod:     "web.a",
+			wantPort:    80,
+			wantNS:      "default",
+			wantCtx:     "microk8s",
+			wantScheme:  "http",
+			wantOK:      true,
+		},
+		{
+			name:        "valid context - kubeconfig names need not be DNS names",
+			hostname:    "nginx-80.svc.default.ns.gke_my-proj_zone_Prod.cx.k8s.localhost",
+			dynamicHost: "k8s.localhost",
+			scheme:      "http",
+			wantService: "nginx",
+			wantPort:    80,
+			wantNS:      "default",
+			wantCtx:     "gke_my-proj_zone_Prod",
+			wantScheme:  "http",
+			wantOK:      true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -225,12 +263,12 @@ func TestParseDynamicHostname(t *testing.T) {
 			}
 
 			if cfg.Service != tt.wantService {
-			t.Errorf("Service = %q, want %q", cfg.Service, tt.wantService)
-		}
-		if cfg.Pod != tt.wantPod {
-			t.Errorf("Pod = %q, want %q", cfg.Pod, tt.wantPod)
-		}
-		if cfg.Port != tt.wantPort {
+				t.Errorf("Service = %q, want %q", cfg.Service, tt.wantService)
+			}
+			if cfg.Pod != tt.wantPod {
+				t.Errorf("Pod = %q, want %q", cfg.Pod, tt.wantPod)
+			}
+			if cfg.Port != tt.wantPort {
 				t.Errorf("Port = %d, want %d", cfg.Port, tt.wantPort)
 			}
 			if cfg.Namespace != tt.wantNS {

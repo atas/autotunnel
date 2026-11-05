@@ -3,6 +3,7 @@ package tunnelmgr
 import (
 	"fmt"
 	"log"
+	"slices"
 	"time"
 
 	"github.com/atas/autotunnel/internal/tunnel"
@@ -27,6 +28,9 @@ func (m *Manager) GetOrCreateTunnel(hostname string, scheme string) (TunnelHandl
 	routeConfig, ok := m.config.HTTP.K8s.Routes[hostname]
 	if !ok {
 		if parsed, valid := ParseDynamicHostname(hostname, m.config.HTTP.K8s.DynamicHost, scheme); valid {
+			if allowed := m.config.HTTP.K8s.DynamicContexts; len(allowed) > 0 && !slices.Contains(allowed, parsed.Context) {
+				return nil, fmt.Errorf("context %q is not in dynamic_contexts", parsed.Context)
+			}
 			routeConfig = *parsed
 			ok = true
 			log.Printf("[dynamic] Resolved %s -> %s/%s:%d (context: %s)",
@@ -73,12 +77,19 @@ func (m *Manager) cleanupIdleHTTPTunnels() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for hostname, tunnel := range m.tunnels {
-		if tunnel.IsRunning() && tunnel.IdleDuration() > m.config.HTTP.IdleTimeout {
-			idleDur := tunnel.IdleDuration().Round(time.Second)
+	for hostname, tun := range m.tunnels {
+		if tun.IdleDuration() <= m.config.HTTP.IdleTimeout {
+			continue
+		}
+		if tun.IsRunning() {
+			idleDur := tun.IdleDuration().Round(time.Second)
 			log.Printf("Tunnel stopped: %s://%s%s (idle for %v)",
-				tunnel.Scheme(), hostname, m.config.HTTP.ListenAddr, idleDur)
-			tunnel.Stop()
+				tun.Scheme(), hostname, m.config.HTTP.ListenAddr, idleDur)
+			tun.Stop()
+			delete(m.tunnels, hostname)
+		} else if tun.State() != tunnel.StateStarting {
+			// Never started or failed: no port-forward to stop, only a map entry.
+			// Dynamic hostnames are client-supplied, so these would pile up forever.
 			delete(m.tunnels, hostname)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/atas/autotunnel/internal/config"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // ParseDynamicHostname extracts k8s routing info from specially formatted hostnames.
@@ -66,8 +67,25 @@ func ParseDynamicHostname(hostname, dynamicHost, scheme string) (*config.K8sRout
 		return nil, false
 	}
 
+	// Tunnels are keyed by hostname, so "080" or "+80" would each open another
+	// tunnel to the same target. Only the canonical spelling of a port parses.
 	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 || port > 65535 {
+	if err != nil || port <= 0 || port > 65535 || strconv.Itoa(port) != portStr {
+		return nil, false
+	}
+
+	// Pod names may be DNS subdomains; services and namespaces are labels.
+	validName := validation.IsDNS1123Subdomain
+	if isService {
+		validName = validation.IsDNS1123Label
+	}
+	if len(validName(name)) > 0 || len(validation.IsDNS1123Label(namespace)) > 0 {
+		return nil, false
+	}
+
+	// Context names come from kubeconfig and need not be DNS names (gke_proj_zone_cluster),
+	// but no real one needs control characters, which SNI can carry into the logs.
+	if strings.ContainsFunc(context, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
 		return nil, false
 	}
 

@@ -2,6 +2,7 @@ package tunnelmgr
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -366,6 +367,105 @@ func TestGetOrCreateTunnel_DynamicRouteResolution(t *testing.T) {
 	}
 }
 
+func TestGetOrCreateTunnel_DynamicContextsAllowlist(t *testing.T) {
+	const (
+		allowed = "nginx-80.svc.default.ns.dev.cx.k8s.localhost"
+		refused = "nginx-80.svc.default.ns.prod.cx.k8s.localhost"
+		unknown = "nginx-80.svc.default.ns.neverbuilt.cx.k8s.localhost"
+	)
+
+	// HTTP passes "http" and TLS passthrough passes "https" through this same call
+	for _, scheme := range []string{"http", "https"} {
+		t.Run(scheme, func(t *testing.T) {
+			cfg := testConfig(map[string]config.K8sRouteConfig{})
+			cfg.HTTP.K8s.DynamicHost = "k8s.localhost"
+			cfg.HTTP.K8s.DynamicContexts = []string{"dev"}
+			m := NewManager(cfg)
+
+			var created []string
+			m.tunnelFactory = func(hostname string, cfg config.K8sRouteConfig,
+				clientset kubernetes.Interface, restConfig *rest.Config,
+				listenAddr string, verbose bool) TunnelHandle {
+				created = append(created, hostname)
+				return newMockTunnel(false)
+			}
+
+			// A cached client for prod means only the allowlist can refuse it
+			m.ClientFactory().InjectClient("dev", nil, nil)
+			m.ClientFactory().InjectClient("prod", nil, nil)
+
+			if _, err := m.GetOrCreateTunnel(allowed, scheme); err != nil {
+				t.Errorf("allowed context: unexpected error: %v", err)
+			}
+
+			_, err := m.GetOrCreateTunnel(refused, scheme)
+			if err == nil || !strings.Contains(err.Error(), "dynamic_contexts") {
+				t.Errorf("refused context: err = %v, want a dynamic_contexts error", err)
+			}
+
+			// No cached client here: reaching the factory would fail with its own error
+			_, err = m.GetOrCreateTunnel(unknown, scheme)
+			if err == nil || strings.Contains(err.Error(), "k8s client") {
+				t.Errorf("unknown context: err = %v, want refusal before any client is built", err)
+			}
+
+			if len(created) != 1 || created[0] != allowed {
+				t.Errorf("tunnels created = %v, want only %s", created, allowed)
+			}
+		})
+	}
+}
+
+// The allowlist limits dynamic routing only: a static route is the user's own choice.
+func TestGetOrCreateTunnel_DynamicContextsIgnoredForStaticRoutes(t *testing.T) {
+	cfg := testConfig(map[string]config.K8sRouteConfig{
+		"prod.localhost": {Context: "prod", Namespace: "default", Service: "app", Port: 80},
+	})
+	cfg.HTTP.K8s.DynamicHost = "k8s.localhost"
+	cfg.HTTP.K8s.DynamicContexts = []string{"dev"}
+	m := NewManager(cfg)
+	m.tunnelFactory = func(hostname string, cfg config.K8sRouteConfig,
+		clientset kubernetes.Interface, restConfig *rest.Config,
+		listenAddr string, verbose bool) TunnelHandle {
+		return newMockTunnel(false)
+	}
+	m.ClientFactory().InjectClient("prod", nil, nil)
+
+	if _, err := m.GetOrCreateTunnel("prod.localhost", "http"); err != nil {
+		t.Errorf("static route refused: %v", err)
+	}
+}
+
+func TestCleanupIdleTunnels_EvictsNonRunningEntries(t *testing.T) {
+	cfg := testConfig(map[string]config.K8sRouteConfig{})
+	cfg.HTTP.IdleTimeout = 30 * time.Minute
+	m := NewManager(cfg)
+
+	add := func(hostname string, state tunnel.State, idle time.Duration) {
+		tun := newMockTunnel(false)
+		tun.state = state
+		tun.idleDuration = idle
+		m.tunnels[hostname] = tun
+	}
+	add("never-started.localhost", tunnel.StateIdle, time.Hour)
+	add("failed.localhost", tunnel.StateFailed, time.Hour)
+	add("starting.localhost", tunnel.StateStarting, time.Hour)
+	add("recent-failure.localhost", tunnel.StateFailed, time.Minute)
+
+	m.cleanupIdleTunnels()
+
+	for _, gone := range []string{"never-started.localhost", "failed.localhost"} {
+		if _, exists := m.tunnels[gone]; exists {
+			t.Errorf("expected %s to be evicted", gone)
+		}
+	}
+	for _, kept := range []string{"starting.localhost", "recent-failure.localhost"} {
+		if _, exists := m.tunnels[kept]; !exists {
+			t.Errorf("expected %s to stay", kept)
+		}
+	}
+}
+
 func TestManager_ConcurrentGetOrCreateTunnel(t *testing.T) {
 	routes := map[string]config.K8sRouteConfig{
 		"test1.localhost": {Context: "test", Namespace: "default", Service: "test1", Port: 80},
@@ -481,4 +581,3 @@ func TestManager_ActiveTunnels_MixedStates(t *testing.T) {
 		t.Errorf("Expected 1 active tunnel, got %d", count)
 	}
 }
-

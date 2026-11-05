@@ -13,6 +13,7 @@ type K8sConfig struct {
 	ResolvedKubeconfigs []string                  `yaml:"-"` // computed at load time
 	Routes              map[string]K8sRouteConfig `yaml:"routes"`
 	DynamicHost         string                    `yaml:"dynamic_host"`
+	DynamicContexts     []string                  `yaml:"dynamic_contexts"` // empty = any context
 }
 
 type K8sRouteConfig struct {
@@ -46,10 +47,10 @@ type TCPConfig struct {
 }
 
 type TCPK8sConfig struct {
-	Kubeconfig          string                   `yaml:"kubeconfig"`
-	ResolvedKubeconfigs []string                 `yaml:"-"` // Computed: resolved paths (not from YAML)
-	Routes              map[int]TCPRouteConfig   `yaml:"routes"` // local port -> direct port-forward route
-	Jump                map[int]JumpRouteConfig  `yaml:"jump"`   // local port -> jump-host route via exec+socat/nc
+	Kubeconfig          string                  `yaml:"kubeconfig"`
+	ResolvedKubeconfigs []string                `yaml:"-"`      // Computed: resolved paths (not from YAML)
+	Routes              map[int]TCPRouteConfig  `yaml:"routes"` // local port -> direct port-forward route
+	Jump                map[int]JumpRouteConfig `yaml:"jump"`   // local port -> jump-host route via exec+socat/nc
 }
 
 // TCPRouteConfig defines a single TCP route (simpler than K8sRouteConfig - no Scheme field)
@@ -89,14 +90,13 @@ func (r TCPRouteConfig) ToK8sRouteConfig() K8sRouteConfig {
 	}
 }
 
-
 // JumpRouteConfig defines a jump-host route via kubectl exec + socat/nc
 // This allows connecting to VPC-internal services (RDS, Cloud SQL, etc.) through a jump pod
 type JumpRouteConfig struct {
-	Context   string       `yaml:"context"`         // K8s context name
-	Namespace string       `yaml:"namespace"`       // K8s namespace
-	Via       ViaConfig    `yaml:"via"`             // Jump pod configuration
-	Target    TargetConfig `yaml:"target"`          // External target (e.g., RDS hostname)
+	Context   string       `yaml:"context"`          // K8s context name
+	Namespace string       `yaml:"namespace"`        // K8s namespace
+	Via       ViaConfig    `yaml:"via"`              // Jump pod configuration
+	Target    TargetConfig `yaml:"target"`           // External target (e.g., RDS hostname)
 	Method    string       `yaml:"method,omitempty"` // "socat" (default) or future alternatives
 }
 
