@@ -35,11 +35,41 @@ jobs:
         uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # The review's agents read the PR with gh. Without these they are denied and see no diff
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*)"'
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request as a senior Go engineer who knows Kubernetes client-go,
+            networking and security. The repository is checked out at the PR's merge commit.
+
+            1. Read the PR with `gh pr view` (title, description) and `gh pr diff`.
+            2. Read CLAUDE.md and every changed file in full, plus the code they call or that calls
+               them, with Read, Grep and Glob. Judge the change in context, not only the diff.
+            3. Look for:
+               - Bugs and wrong logic, including edge cases and error paths
+               - Concurrency: data races, deadlocks, goroutine and connection leaks, unsafe close
+               - Security: anything reachable from a browser or another local process, input
+                 validation, TLS, secrets
+               - Resource handling: timeouts, contexts, file descriptors, cleanup
+               - Behaviour changes the PR description doesn't mention, and config compatibility
+               - Tests that don't test what they claim, or important paths left untested
+               - Docs (README.md, internal/README.md, default_config.yaml) that the change makes wrong
+               - Clear breaks of a CLAUDE.md rule
+            4. Before reporting a finding, confirm it by reading the code involved. Drop anything
+               you can't confirm, and skip style preferences and nitpicks.
+            5. For each confirmed finding, post one inline comment on the line it concerns with
+               `mcp__github_inline_comment__create_inline_comment`. Start it with its severity
+               (**High**, **Medium** or **Low**), say what goes wrong and when, and suggest a fix.
+               Only add a suggestion block if applying it fully fixes the issue.
+            6. Finish with one `gh pr comment` that starts with "## Claude review", gives a
+               one-line verdict, lists the findings by severity with file:line, and says briefly
+               what you checked. If you found nothing, say what you checked.
+
+          # Opus for the review. The tools are read-only apart from posting the comments
+          claude_args: |
+            --model claude-opus-5-5
+            --max-turns 120
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
