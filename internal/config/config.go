@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +35,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	warnUnknownKeys(path, data)
+
 	cfg.HTTP.K8s.ResolvedKubeconfigs = resolveKubeconfigs(cfg.HTTP.K8s.Kubeconfig)
 
 	if cfg.TCP.K8s.Kubeconfig != "" {
@@ -45,6 +50,20 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// warnUnknownKeys logs keys that no field takes, typos most likely. They are not errors, so that
+// a config with extra keys, or written for a newer version, keeps loading.
+func warnUnknownKeys(path string, data []byte) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+
+	var typeErr *yaml.TypeError
+	if err := dec.Decode(DefaultConfig()); errors.As(err, &typeErr) {
+		for _, msg := range typeErr.Errors {
+			log.Printf("Warning: ignoring unknown key in %s: %s", path, msg)
+		}
+	}
 }
 
 // resolveKubeconfigs supports: explicit paths, $KUBECONFIG, or default ~/.kube/config

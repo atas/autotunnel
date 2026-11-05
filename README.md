@@ -43,7 +43,7 @@ brew services start autotunnel    # Start and enable auto-start on login
 ```
 
 **After starting it, edit the created config file `~/.autotunnel.yaml` with an editor to add your custom routes / kubeconfig paths.**  
-The config auto-reloads on save unless port changes, then `brew services restart autotunnel` is required.
+The config auto-reloads on save. If the new config is invalid or needs a port that is already in use, autotunnel keeps running the current one and logs why. Unknown keys, such as typos, are logged as warnings and ignored.
 
 #### Logs
 ```bash
@@ -103,7 +103,7 @@ brew services start autotunnel #or just run `autotunnel` manually
 
 2. Edit `~/.autotunnel.yaml` with your services:
 
-3. It will auto-reload unless port changes.
+3. It will auto-reload.
 
 ```yaml
 apiVersion: autotunnel/v1
@@ -121,7 +121,7 @@ auto_reload_config: true
 
 http:
    # Listen address - handles both HTTP and HTTPS (TLS passthrough) on same port
-   listen: "127.0.0.1:8989" # Port changes require: brew services restart autotunnel
+   listen: "127.0.0.1:8989"
 
    # Idle timeout before closing tunnels (Go duration format)
    # After this duration of no traffic, the tunnel will be closed
@@ -255,7 +255,7 @@ auto_reload_config: true
 
 http:
   # Listen address (handles both HTTP and HTTPS on same port)
-  listen: "127.0.0.1:8989"  # Port changes require: brew services restart autotunnel
+  listen: "127.0.0.1:8989"
 
   # Idle timeout before closing tunnels (Go duration format)
   idle_timeout: 60m
