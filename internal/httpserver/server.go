@@ -24,6 +24,8 @@ type Server struct {
 	server               *http.Server
 	done                 chan struct{}
 	tlsErrorCertProvider *tlsErrorCertProvider
+	stallMin             time.Duration
+	stallMax             time.Duration
 }
 
 func NewServer(cfg *config.Config, mgr Manager) *Server {
@@ -35,6 +37,8 @@ func NewServer(cfg *config.Config, mgr Manager) *Server {
 		manager:              mgr,
 		done:                 make(chan struct{}),
 		tlsErrorCertProvider: certProvider,
+		stallMin:             PortForwardStallMin,
+		stallMax:             PortForwardStallMax,
 	}
 }
 
@@ -46,10 +50,11 @@ func (s *Server) Start() error {
 	s.listener = mux
 
 	s.server = &http.Server{
-		Handler:      s,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Handler: s,
+		// Only the headers get a deadline. ReadTimeout and WriteTimeout would
+		// also cut proxied streams, slow responses and slow uploads.
+		ReadHeaderTimeout: HTTPReadHeaderTimeout,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
