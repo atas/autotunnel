@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -74,6 +75,10 @@ func NewTunnel(hostname string, cfg config.K8sRouteConfig, clientset kubernetes.
 	}
 }
 
+// ErrFailed is what Start returns for a tunnel that has failed. The manager has replaced it, so
+// a caller holding it asks the manager again.
+var ErrFailed = errors.New("tunnel already failed")
+
 func (t *Tunnel) Start(ctx context.Context) error {
 	t.mu.Lock()
 	if t.state == StateRunning {
@@ -89,7 +94,10 @@ func (t *Tunnel) Start(ctx context.Context) error {
 		// here could bring back an object the manager has already dropped.
 		err := t.lastError
 		t.mu.Unlock()
-		return fmt.Errorf("tunnel already failed: %w", err)
+		if err == nil {
+			return ErrFailed
+		}
+		return fmt.Errorf("%w: %w", ErrFailed, err)
 	}
 	t.state = StateStarting
 	t.mu.Unlock()

@@ -2,12 +2,14 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"time"
 
 	"github.com/atas/autotunnel/internal/netutil"
+	"github.com/atas/autotunnel/internal/tunnelmgr"
 )
 
 func (s *Server) handleTLSConnection(conn *peekConn) {
@@ -46,11 +48,22 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		return
 	}
 	tunnel.Acquire()
-	defer tunnel.Release()
+	defer func() { tunnel.Release() }() // the tunnel in use when it returns
 
 	if !tunnel.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), TLSTunnelStartTimeout)
-		if err := tunnel.Start(ctx); err != nil {
+		err := tunnel.Start(ctx)
+		if errors.Is(err, tunnelmgr.ErrTunnelFailed) {
+			// Another connection saw it fail after we got it, and the manager has a replacement
+			var next tunnelmgr.TunnelHandle
+			if next, err = s.manager.GetOrCreateTunnel(sni, "https"); err == nil {
+				tunnel.Release()
+				tunnel = next
+				tunnel.Acquire()
+				err = tunnel.Start(ctx)
+			}
+		}
+		if err != nil {
 			cancel()
 			log.Printf("[tls] [%s] Failed to start tunnel: %v", sni, err)
 			s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorTunnelStartup, fmt.Sprintf("Failed to start tunnel: %v", err))

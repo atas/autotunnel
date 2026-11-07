@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -31,7 +32,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !tunnel.IsRunning() {
-		if err := tunnel.Start(r.Context()); err != nil {
+		err := tunnel.Start(r.Context())
+		if errors.Is(err, tunnelmgr.ErrTunnelFailed) {
+			// Another request saw it fail after we got it, and the manager has a replacement
+			if tunnel, err = s.manager.GetOrCreateTunnel(host, "http"); err == nil {
+				err = tunnel.Start(r.Context())
+			}
+		}
+		if err != nil {
 			log.Printf("[http] [%s] Failed to start tunnel: %v", host, err)
 			http.Error(w, fmt.Sprintf("Failed to start tunnel: %v", err), http.StatusBadGateway)
 			return

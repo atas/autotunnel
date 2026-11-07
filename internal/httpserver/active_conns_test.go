@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -32,13 +33,14 @@ type countingTunnel struct {
 	active    atomic.Int32
 }
 
-func (c *countingTunnel) IsRunning() bool  { return true }
-func (c *countingTunnel) LocalPort() int   { return c.localPort }
-func (c *countingTunnel) Scheme() string   { return "http" }
-func (c *countingTunnel) Touch()           {}
-func (c *countingTunnel) Acquire()         { c.active.Add(1) }
-func (c *countingTunnel) Release()         { c.active.Add(-1) }
-func (c *countingTunnel) ActiveConns() int { return int(c.active.Load()) }
+func (c *countingTunnel) IsRunning() bool             { return true }
+func (c *countingTunnel) Start(context.Context) error { return nil }
+func (c *countingTunnel) LocalPort() int              { return c.localPort }
+func (c *countingTunnel) Scheme() string              { return "http" }
+func (c *countingTunnel) Touch()                      {}
+func (c *countingTunnel) Acquire()                    { c.active.Add(1) }
+func (c *countingTunnel) Release()                    { c.active.Add(-1) }
+func (c *countingTunnel) ActiveConns() int            { return int(c.active.Load()) }
 
 func waitForActiveConns(t *testing.T, tun *countingTunnel, want int) {
 	t.Helper()
@@ -148,4 +150,109 @@ func TestServeHTTP_CountsUpgradedConnectionWhileOpen(t *testing.T) {
 
 	client.Close()
 	waitForActiveConns(t, tun, 0)
+}
+
+// staleTunnel failed after the manager handed it out, as when another request marked it failed.
+type staleTunnel struct {
+	tunnelmgr.TunnelHandle
+	active atomic.Int32
+}
+
+func (s *staleTunnel) IsRunning() bool { return false }
+func (s *staleTunnel) Start(context.Context) error {
+	return fmt.Errorf("%w: port-forward died", tunnelmgr.ErrTunnelFailed)
+}
+func (s *staleTunnel) Acquire() { s.active.Add(1) }
+func (s *staleTunnel) Release() { s.active.Add(-1) }
+
+// seqManager hands out its tunnels in order, the last one from then on.
+type seqManager struct {
+	tunnels []tunnelmgr.TunnelHandle
+	calls   int
+}
+
+func (m *seqManager) GetOrCreateTunnel(string, string) (tunnelmgr.TunnelHandle, error) {
+	t := m.tunnels[min(m.calls, len(m.tunnels)-1)]
+	m.calls++
+	return t, nil
+}
+
+func echoBackend(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				_, _ = io.Copy(conn, conn)
+			}()
+		}
+	}()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// A request holding a tunnel that failed meanwhile is served by the manager's replacement.
+func TestServeHTTP_StaleFailedTunnelUsesReplacement(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer backend.Close()
+
+	fresh := &countingTunnel{localPort: backend.Listener.Addr().(*net.TCPAddr).Port}
+	mgr := &seqManager{tunnels: []tunnelmgr.TunnelHandle{&staleTunnel{}, fresh}}
+	front := httptest.NewServer(NewServer(testHTTPConfig(), mgr))
+	defer front.Close()
+
+	resp, err := http.Get(front.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if mgr.calls != 2 {
+		t.Errorf("GetOrCreateTunnel calls = %d, want 2", mgr.calls)
+	}
+}
+
+func TestHandleTLSConnection_StaleFailedTunnelUsesReplacement(t *testing.T) {
+	clientHello := generateClientHello("test.localhost")
+	stale := &staleTunnel{}
+	fresh := &countingTunnel{localPort: echoBackend(t)}
+	s := NewServer(testHTTPConfig(), &seqManager{tunnels: []tunnelmgr.TunnelHandle{stale, fresh}})
+
+	client, server := net.Pipe()
+	defer client.Close()
+	done := make(chan struct{})
+	go func() {
+		s.handleTLSConnection(newPeekConn(server))
+		close(done)
+	}()
+
+	_ = client.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := client.Write(clientHello); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(client, make([]byte, len(clientHello))); err != nil {
+		t.Fatalf("connection not served by the replacement: %v", err)
+	}
+	if got := fresh.ActiveConns(); got != 1 {
+		t.Errorf("replacement ActiveConns = %d, want 1", got)
+	}
+	if got := stale.active.Load(); got != 0 {
+		t.Errorf("failed tunnel still counted: %d", got)
+	}
+
+	client.Close()
+	<-done
+	if got := fresh.ActiveConns(); got != 0 {
+		t.Errorf("replacement ActiveConns after = %d, want 0", got)
+	}
 }
