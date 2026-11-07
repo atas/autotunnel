@@ -289,9 +289,11 @@ func droppingBackend(t *testing.T, delay time.Duration, drain bool) int {
 }
 
 // A dropped connection can't be told apart from the backend timing the request out,
-// so it never fails the shared tunnel and its other streams. A black-holed
-// port-forward fails itself when it can't open a stream. The request is sent again
-// only if that is safe.
+// so it never fails the shared tunnel and its other streams. The request is sent
+// again only if that is safe. Like the real manager, the mock hands out the same
+// tunnel again, as it is not failed, so the retry is dropped too. (A black-holed
+// port-forward fails itself when it can't open a stream, and the retry then gets a
+// fresh tunnel.)
 func TestServeHTTP_DroppedConnectionKeepsTunnel(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -301,22 +303,16 @@ func TestServeHTTP_DroppedConnectionKeepsTunnel(t *testing.T) {
 		wantStatus   int
 		wantGetCalls int
 	}{
-		{"GET retried", "GET", "", false, http.StatusOK, 2},
-		{"GET dropped with EOF", "GET", "", true, http.StatusOK, 2},
+		{"GET retried", "GET", "", false, http.StatusBadGateway, 2},
+		{"GET dropped with EOF", "GET", "", true, http.StatusBadGateway, 2},
 		{"POST not retried", "POST", "payload", false, http.StatusBadGateway, 1},
 		{"POST larger than socket buffers", "POST", strings.Repeat("x", 8<<20), false, http.StatusBadGateway, 1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, _ = io.Copy(io.Discard, r.Body)
-			}))
-			defer backend.Close()
-
 			droppingTun := runningTunnel(droppingBackend(t, 100*time.Millisecond, tt.drain))
-			nextTun := runningTunnel(listenerPort(backend.Listener))
-			mgr := &retryMockManager{tunnels: []tunnelmgr.TunnelHandle{droppingTun, nextTun}}
+			mgr := &retryMockManager{tunnels: []tunnelmgr.TunnelHandle{droppingTun}}
 			front := frontServer(mgr)
 			defer front.Close()
 
