@@ -411,6 +411,10 @@ Connect to VPC-internal services through a jump pod. Requires `socat` or `nc` in
 | `target.port`        | Target port                                                             |
 | `method`             | `socat` (default) - forwarding method in jump pod (nc is auto-fallback) |
 
+`nc` is used only when `socat` is not installed. If `socat` fails, the connection ends. After a client half-closes, the response can still arrive; the connection ends after 30s without traffic.
+
+With `via.create`, connections wait for the pod to be ready, up to `via.create.timeout`. A pod that autotunnel created is replaced once it has failed, finished or been deleted. A failed or finished pod that it did not create is left alone and the connection fails with an error.
+
 Auto-created pods have labels `app.kubernetes.io/managed-by: autotunnel`. Clean up with:
 ```bash
 kubectl delete pod -l app.kubernetes.io/managed-by=autotunnel
