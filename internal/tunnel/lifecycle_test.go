@@ -60,6 +60,8 @@ func (f *fakeAPIServer) portForward(w http.ResponseWriter, r *http.Request) {
 	if _, err := httpstream.Handshake(r, w, []string{"portforward.k8s.io"}); err != nil {
 		return
 	}
+	// Counted before the upgrade: the client can go on as soon as it has the response
+	f.dials.Add(1)
 	streams := make(chan httpstream.Stream, 64)
 	conn := spdy.NewResponseUpgrader().UpgradeResponse(w, r, func(s httpstream.Stream, _ <-chan struct{}) error {
 		if f.rejectStreams.Load() {
@@ -71,7 +73,6 @@ func (f *fakeAPIServer) portForward(w http.ResponseWriter, r *http.Request) {
 	if conn == nil {
 		return
 	}
-	f.dials.Add(1)
 	f.mu.Lock()
 	f.conns[conn] = struct{}{}
 	f.mu.Unlock()
