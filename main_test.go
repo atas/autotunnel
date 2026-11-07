@@ -299,7 +299,7 @@ func TestRun_FailedRestartRestoresOldConfig(t *testing.T) {
 					t.Fatalf("Failed to load config: %v", err)
 				}
 				// Go around the watcher's port check, as if the port got taken right after it
-				app.watcher.RestoreConfig(next)
+				app.watcher.RestoreConfig(app.watcher.GetConfig(), next)
 				app.watcher.ReloadChan <- struct{}{}
 			}
 

@@ -917,3 +917,61 @@ func TestConfigWatcher_VerboseComparison(t *testing.T) {
 		}
 	})
 }
+
+// A file in the same directory written more often than the debounce, like a shell history in $HOME,
+// must not keep pushing the reload back.
+func TestConfigWatcher_BusyNeighbourDoesNotDelayReload(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "cfg.yaml")
+	writeFile(t, configPath, routeConfig("initial.localhost"))
+	w := startWatcher(t, configPath, false)
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		busy := filepath.Join(dir, "busy.log")
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			case <-time.After(100 * time.Millisecond):
+				// Saved through a rename, as shells and editors do, so the directory itself changes
+				_ = os.WriteFile(busy+".tmp", []byte(strconv.Itoa(i)), 0644)
+				_ = os.Rename(busy+".tmp", busy)
+			}
+		}
+	}()
+	defer func() { close(stop); <-done }()
+
+	time.Sleep(200 * time.Millisecond)
+	writeFile(t, configPath, routeConfig("changed.localhost"))
+	expectReload(t, w, "changed.localhost")
+}
+
+func TestConfigWatcher_RestoreConfigKeepsNewerConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "cfg.yaml")
+	writeFile(t, configPath, routeConfig("initial.localhost"))
+	w := startWatcher(t, configPath, false)
+	previous := w.GetConfig()
+
+	writeFile(t, configPath, routeConfig("failed.localhost"))
+	expectReload(t, w, "failed.localhost")
+	failed := w.GetConfig()
+
+	// A newer config arrives while the failed one is being shut down
+	writeFile(t, configPath, routeConfig("newer.localhost"))
+	expectReload(t, w, "newer.localhost")
+
+	if w.RestoreConfig(failed, previous) {
+		t.Fatal("Expected RestoreConfig to keep the newer config")
+	}
+	if _, ok := w.GetConfig().HTTP.K8s.Routes["newer.localhost"]; !ok {
+		t.Fatalf("Expected the newer config to stay, got %v", w.GetConfig().HTTP.K8s.Routes)
+	}
+
+	if !w.RestoreConfig(w.GetConfig(), previous) || w.GetConfig() != previous {
+		t.Fatal("Expected RestoreConfig to put the previous config back")
+	}
+}

@@ -98,6 +98,12 @@ func (cw *ConfigWatcher) watchLoop() {
 	var debounceTimer *time.Timer
 	var debounceMu sync.Mutex
 
+	// The snapshot at the last event that changed it. Events for other files in the directory leave
+	// it as it is, so they cannot keep pushing the reload back.
+	cw.mu.Lock()
+	seen := cw.lastSnapshot
+	cw.mu.Unlock()
+
 	scheduleReload := func() {
 		debounceMu.Lock()
 		defer debounceMu.Unlock()
@@ -123,7 +129,10 @@ func (cw *ConfigWatcher) watchLoop() {
 			if err := cw.notifier.set(chain.dirs, chain.file); err != nil {
 				log.Printf("Config watcher error: %v", err)
 			}
-			scheduleReload()
+			if snapshot := chain.snapshot(); snapshot != seen {
+				seen = snapshot
+				scheduleReload()
+			}
 
 		case err := <-cw.notifier.errors():
 			log.Printf("Config watcher error: %v", err)
@@ -284,10 +293,15 @@ func (cw *ConfigWatcher) GetConfig() *config.Config {
 	return cw.currentConfig
 }
 
-// RestoreConfig puts back a config after the one the watcher handed out failed to start.
-// Saving the failed file again then counts as a change, so it is retried.
-func (cw *ConfigWatcher) RestoreConfig(cfg *config.Config) {
+// RestoreConfig puts previous back after failed, the config the watcher handed out, did not start.
+// Saving the failed file again then counts as a change, so it is retried. If the watcher has
+// accepted a newer config meanwhile, that one stays and RestoreConfig returns false.
+func (cw *ConfigWatcher) RestoreConfig(failed, previous *config.Config) bool {
 	cw.mu.Lock()
 	defer cw.mu.Unlock()
-	cw.currentConfig = cfg
+	if cw.currentConfig != failed {
+		return false
+	}
+	cw.currentConfig = previous
+	return true
 }

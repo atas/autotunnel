@@ -446,8 +446,9 @@ sequenceDiagram
         fs->>w: Something changed in a watched directory or the file
         w->>fs: Follow the symlinks again, watch any new directory or replaced file
 
-        w->>w: Debounce timer (500ms)
-        Note over w: Stop here if the links, size and modified time are as at the last load
+        Note over w: Ignore the event if the links, size and modified time are as at the last event
+        w->>w: Debounce timer (500ms), restarted only by events that changed them
+        Note over w: Stop here if they are as at the last load
         w->>w: reloadConfig()
         w->>cfg: LoadConfig(path)
         cfg-->>w: *Config (validated)

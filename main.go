@@ -159,9 +159,13 @@ func run(configPath string, cfg *config.Config, configWatcher *watcher.ConfigWat
 			if fallback == nil {
 				return startErr
 			}
-			log.Printf("Failed to start with new config: %v (restoring previous config)", startErr)
-			configWatcher.RestoreConfig(fallback)
-			fallback = nil
+			if configWatcher.RestoreConfig(app.cfg, fallback) {
+				log.Printf("Failed to start with new config: %v (restoring previous config)", startErr)
+				fallback = nil
+			} else {
+				// A newer config came in while this one failed: try it, and keep fallback for it
+				log.Printf("Failed to start with new config: %v (trying the newer config)", startErr)
+			}
 		}
 
 		// Small delay before restart to let ports release
