@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -39,12 +40,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !tunnel.IsRunning() {
-		if err := tunnel.Start(r.Context()); err != nil {
-			log.Printf("[http] [%s] Failed to start tunnel: %v", host, err)
-			http.Error(w, fmt.Sprintf("Failed to start tunnel: %v", err), http.StatusBadGateway)
-			return
-		}
+	if tunnel, err = s.startTunnel(r.Context(), host, tunnel); err != nil {
+		log.Printf("[http] [%s] Failed to start tunnel: %v", host, err)
+		http.Error(w, fmt.Sprintf("Failed to start tunnel: %v", err), http.StatusBadGateway)
+		return
 	}
 
 	tunnel.Touch()
@@ -87,12 +86,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !tunnel.IsRunning() {
-		if err := tunnel.Start(r.Context()); err != nil {
-			log.Printf("[http] [%s] Retry failed to start tunnel: %v", host, err)
-			http.Error(w, fmt.Sprintf("Failed to start tunnel: %v", err), http.StatusBadGateway)
-			return
-		}
+	if tunnel, err = s.startTunnel(r.Context(), host, tunnel); err != nil {
+		log.Printf("[http] [%s] Retry failed to start tunnel: %v", host, err)
+		http.Error(w, fmt.Sprintf("Failed to start tunnel: %v", err), http.StatusBadGateway)
+		return
 	}
 
 	tunnel.Touch()
@@ -117,6 +114,21 @@ func isSafeToRepeat(r *http.Request) bool {
 		return r.ContentLength == 0
 	}
 	return false
+}
+
+// startTunnel starts tun unless it is running. If another request saw it fail after the
+// manager handed it out, the manager has a replacement, which is started instead.
+func (s *Server) startTunnel(ctx context.Context, host string, tun tunnelmgr.TunnelHandle) (tunnelmgr.TunnelHandle, error) {
+	if tun.IsRunning() {
+		return tun, nil
+	}
+	err := tun.Start(ctx)
+	if errors.Is(err, tunnelmgr.ErrTunnelFailed) {
+		if tun, err = s.manager.GetOrCreateTunnel(host, "http"); err == nil {
+			err = tun.Start(ctx)
+		}
+	}
+	return tun, err
 }
 
 // proxyRequest forwards the HTTP request to the tunnel's local port.
@@ -153,6 +165,8 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, host strin
 		// whether to retry or report the error.
 	}
 
+	tun.Acquire()
+	defer tun.Release()
 	proxy.ServeHTTP(w, r)
 
 	return proxyErr

@@ -1,6 +1,8 @@
 package tunnel
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -205,5 +207,20 @@ func TestTunnel_MarkFailed_NilStopChan(t *testing.T) {
 
 	if tun.state != StateFailed {
 		t.Errorf("state = %v, want %v", tun.state, StateFailed)
+	}
+}
+
+// Callers holding a failed tunnel tell this error apart, to ask the manager for its replacement.
+func TestTunnel_StartAfterFailedReturnsErrFailed(t *testing.T) {
+	cause := &testError{msg: "connection reset by peer"}
+	tun := &Tunnel{hostname: "test.localhost", state: StateRunning, stopChan: make(chan struct{})}
+	tun.MarkFailed(cause)
+
+	err := tun.Start(context.Background())
+	if !errors.Is(err, ErrFailed) {
+		t.Errorf("Start = %v, want ErrFailed", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("Start = %v, want it to wrap %v", err, cause)
 	}
 }

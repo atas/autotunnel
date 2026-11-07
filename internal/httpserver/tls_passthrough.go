@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/atas/autotunnel/internal/netutil"
+	"github.com/atas/autotunnel/internal/tunnelmgr"
 )
 
 // maxClientHelloSize limits how much a client can make us buffer before routing.
@@ -50,10 +51,23 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		s.sendTLSErrorPage(conn.Conn, hello, sni, tlsErrorRouteNotFound, fmt.Sprintf("No service configured for host: %s", sni))
 		return
 	}
+	tunnel.Acquire()
+	defer func() { tunnel.Release() }() // the tunnel in use when it returns
 
 	if !tunnel.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), TLSTunnelStartTimeout)
-		if err := tunnel.Start(ctx); err != nil {
+		err := tunnel.Start(ctx)
+		if errors.Is(err, tunnelmgr.ErrTunnelFailed) {
+			// Another connection saw it fail after we got it, and the manager has a replacement
+			var next tunnelmgr.TunnelHandle
+			if next, err = s.manager.GetOrCreateTunnel(sni, "https"); err == nil {
+				tunnel.Release()
+				tunnel = next
+				tunnel.Acquire()
+				err = tunnel.Start(ctx)
+			}
+		}
+		if err != nil {
 			cancel()
 			log.Printf("[tls] [%s] Failed to start tunnel: %v", sni, err)
 			s.sendTLSErrorPage(conn.Conn, hello, sni, tlsErrorTunnelStartup, fmt.Sprintf("Failed to start tunnel: %v", err))

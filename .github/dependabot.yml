@@ -4,6 +4,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Leaves a week for a bad release to be caught before it can auto-merge.
+    # Security updates are not delayed by this.
+    cooldown:
+      default-days: 7
     groups:
       # client-go, api and apimachinery are released together and must match.
       kubernetes:
