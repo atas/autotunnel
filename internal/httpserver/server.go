@@ -56,10 +56,11 @@ func (s *Server) Listen() error {
 	s.listener = mux
 
 	s.server = &http.Server{
-		Handler:      s,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Handler: s,
+		// Only the headers get a deadline. ReadTimeout and WriteTimeout would
+		// also cut proxied streams, slow responses and slow uploads.
+		ReadHeaderTimeout: HTTPReadHeaderTimeout,
+		IdleTimeout:       120 * time.Second,
 	}
 	return nil
 }

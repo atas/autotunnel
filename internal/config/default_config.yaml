@@ -26,6 +26,9 @@ http:
     # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
     # Dynamic routing: access any K8s service or pod without pre-configuring routes
+    # Off by default. There is no authentication: once on, any local process can reach
+    # anything your kubeconfig can, and web pages can send it GET navigations.
+    # See the Security Note in the README before enabling it.
     # IMPORTANT: *.localhost domains don't resolve to 127.0.0.1 on all systems.
     #            You can use local.gd, sslip.io, lvh.me, etc. if you TRUST them.
     # Formats:
@@ -35,7 +38,11 @@ http:
     #   http://nginx-80.svc.default.ns.my-cluster-context.cx.k8s.localhost:8989
     #   https://argocd-server-443.svc.argocd.ns.my-cluster-context.cx.k8s.localhost:8989
     #   http://nginx-2fxac-80.pod.default.ns.my-cluster-context.cx.k8s.localhost:8989
-    dynamic_host: k8s.localhost
+    # dynamic_host: k8s.localhost
+
+    # Optional: only these contexts can be reached through dynamic routing, for HTTP and
+    # HTTPS alike. When empty or absent, every context in your kubeconfig can be.
+    # dynamic_contexts: [docker-desktop, my-dev-cluster]
 
     routes:
       # Static routes (take priority over dynamic routing)

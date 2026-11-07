@@ -15,7 +15,7 @@ A lightweight, auto and on-demand (lazy) port-forwarding proxy to Kubernetes. Tu
 
 Connect to Kubernetes services and pods with friendly URLs automatically:
 
-* `http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989` — Dynamic routing (no config needed)
+* `http://nginx-80.svc.default.ns.microk8s.cx.k8s.localhost:8989` — Dynamic routing (opt-in with `dynamic_host`, no per-service config; see the [Security Note](#security-note))
 * `https://argocd.localhost:8989` — Pre-configured route
 
 ### Features
@@ -133,6 +133,7 @@ http:
       # kubeconfig: ~/.kube/config:~/.kube/prod-config
 
       # Dynamic routing: access any K8s service or pod without pre-configuring routes
+      # Off by default. Read the Security Note below before enabling it.
       # Formats:
       #   Service: {service}-{port}.svc.{namespace}.ns.{context}.cx.{dynamic_host}
       #   Pod:     {pod}-{port}.pod.{namespace}.ns.{context}.cx.{dynamic_host}
@@ -140,7 +141,8 @@ http:
       #   http://nginx-80.svc.default.ns.my-cluster-context.cx.k8s.localhost:8989
       #   https://argocd-server-443.svc.argocd.ns.my-cluster-context.cx.k8s.localhost:8989
       #   http://nginx-2fxac-80.pod.default.ns.my-cluster-context.cx.k8s.localhost:8989
-      dynamic_host: k8s.localhost
+      # dynamic_host: k8s.localhost
+      # dynamic_contexts: [docker-desktop, my-dev-cluster] # Optional. Default is any context.
 
       routes:
          # Static routes (take priority over dynamic routing)
@@ -363,6 +365,17 @@ Each route requires either `service` or `pod` (mutually exclusive):
 | `port`      | Service or pod port                                         |
 | `scheme`    | `http` (default) or `https` - sets X-Forwarded-Proto header |
 
+### Dynamic Routing Options
+
+Set under `http.k8s`. Dynamic routing stays off until `dynamic_host` is set; read the [Security Note](#security-note) first.
+
+| Field              | Description                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `dynamic_host`     | Hostname suffix that turns on dynamic routing, e.g. `k8s.localhost`                                   |
+| `dynamic_contexts` | Optional list of kubeconfig contexts dynamic routing may use, matched exactly. Empty means any context |
+
+A dynamic hostname must use valid Kubernetes names in lowercase and a plain port number: `nginx-080` is not an alias for `nginx-80`.
+
 ### TCP Route Options
 
 Direct port-forward to K8s services/pods. Each route requires either `service` or `pod`:
@@ -442,7 +455,34 @@ For custom hostnames, add entries to `/etc/hosts`:
 
 ## Security Note
 
-autotunnel uses standard Kubernetes port-forwarding. Access is governed by your kubeconfig credentials and RBAC policies. Use appropriate caution when connecting to production environments.
+**autotunnel has no authentication.** Any process on your machine and any web page in your browser that can reach the listen port acts with your kubeconfig credentials. RBAC does not limit this, because your RBAC access is exactly what is being lent out. Keep `http.listen` on a loopback address, and use caution with contexts that reach production.
+
+**Static routes** reach only what you listed, and you configured them deliberately. They get none of the checks below: a page can send them requests, the same exposure as a port opened by `kubectl port-forward`.
+
+**Dynamic routing** is more exposed, because the hostname picks the context, namespace and target, so everything your credentials can reach is in play. It is off until you opt in, and limiting it to contexts you accept this for is recommended:
+
+```yaml
+http:
+  k8s:
+    dynamic_host: k8s.localhost
+    dynamic_contexts: [docker-desktop, my-dev-cluster]
+```
+
+On dynamic hostnames autotunnel does the following:
+
+* `dynamic_contexts` refuses other contexts for HTTP and HTTPS alike, before any Kubernetes client is built.
+* Plain HTTP requests get a 403 when another page made them, WebSocket upgrades included. That means `Sec-Fetch-Site: cross-site` or `same-site` unless the request is a top-level GET or HEAD navigation, and any `Origin` whose host differs from `Host`, including `Origin: null`.
+* Plain HTTP responses lose the `Domain` attribute from `Set-Cookie`, so a backend's cookies stay on its own hostname.
+
+These checks do not cover everything:
+
+* **Local processes.** curl and scripts send neither header and pass. Only `dynamic_contexts`, or leaving dynamic routing off, limits them.
+* **Links and redirects.** Another page can still navigate your browser to a dynamic hostname with GET. That opens a tunnel and runs whatever the backend does on that GET.
+* **HTTPS.** TLS passthrough never sees the request or response, so only `dynamic_contexts` applies.
+* **Other hostnames.** Browsers send `Sec-Fetch-*` only to HTTPS and localhost-style hosts. With a `dynamic_host` such as `lvh.me` over plain HTTP, only the `Origin` check runs, and a cross-site GET such as an image does not carry `Origin`.
+* **Cookies set from script.** All dynamic hostnames share one site, so a page on one can still set cookies for the others with `document.cookie`. Static routes on separate `*.localhost` names do not share a site.
+
+The checks can also refuse legitimate requests. An app whose page calls an API on a different dynamic hostname gets a 403, and so does a same-origin POST from a page with `Referrer-Policy: no-referrer`, since browsers send it with `Origin: null`. Use static routes for those apps.
 
 ## Development
 

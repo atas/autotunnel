@@ -12,15 +12,19 @@ import (
 	"github.com/atas/autotunnel/internal/tunnelmgr"
 )
 
+// maxClientHelloSize limits how much a client can make us buffer before routing.
+// crypto/tls has the same limit on handshake messages.
+const maxClientHelloSize = 64 * 1024
+
+var errIncompleteClientHello = errors.New("incomplete ClientHello")
+
 func (s *Server) handleTLSConnection(conn *peekConn) {
 	defer conn.Close()
 
 	// give slow clients time to send ClientHello
 	_ = conn.Conn.SetReadDeadline(time.Now().Add(TLSClientHelloDeadline))
 
-	// Read enough for ClientHello
-	buf := make([]byte, 16384)
-	n, err := conn.Read(buf)
+	hello, err := readClientHello(conn)
 	if err != nil {
 		if s.config.Verbose {
 			log.Printf("[tls] Error reading ClientHello: %v", err)
@@ -30,10 +34,10 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 
 	_ = conn.Conn.SetReadDeadline(time.Time{})
 
-	sni, err := extractSNI(buf[:n])
+	sni, err := extractSNI(hello)
 	if err != nil {
 		log.Printf("[tls] Failed to extract SNI: %v", err)
-		s.sendTLSErrorPage(conn.Conn, buf[:n], "", tlsErrorSNIExtraction, fmt.Sprintf("Failed to extract SNI: %v", err))
+		s.sendTLSErrorPage(conn.Conn, hello, "", tlsErrorSNIExtraction, fmt.Sprintf("Failed to extract SNI: %v", err))
 		return
 	}
 
@@ -44,7 +48,7 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 	tunnel, err := s.manager.GetOrCreateTunnel(sni, "https")
 	if err != nil {
 		log.Printf("[tls] [%s] Error: %v", sni, err)
-		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorRouteNotFound, fmt.Sprintf("No service configured for host: %s", sni))
+		s.sendTLSErrorPage(conn.Conn, hello, sni, tlsErrorRouteNotFound, fmt.Sprintf("No service configured for host: %s", sni))
 		return
 	}
 	tunnel.Acquire()
@@ -66,7 +70,7 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		if err != nil {
 			cancel()
 			log.Printf("[tls] [%s] Failed to start tunnel: %v", sni, err)
-			s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorTunnelStartup, fmt.Sprintf("Failed to start tunnel: %v", err))
+			s.sendTLSErrorPage(conn.Conn, hello, sni, tlsErrorTunnelStartup, fmt.Sprintf("Failed to start tunnel: %v", err))
 			return
 		}
 		cancel()
@@ -80,19 +84,43 @@ func (s *Server) handleTLSConnection(conn *peekConn) {
 		log.Printf("[tls] [%s] Failed to connect to backend: %v", sni, err)
 		// Port-forward is likely dead -- mark tunnel failed so next connection recreates it
 		tunnel.MarkFailed(fmt.Errorf("backend dial failed: %w", err))
-		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorBackendConnection, fmt.Sprintf("Failed to connect to backend: %v", err))
+		s.sendTLSErrorPage(conn.Conn, hello, sni, tlsErrorBackendConnection, fmt.Sprintf("Failed to connect to backend: %v", err))
 		return
 	}
 	defer backendConn.Close()
 
 	// replay the ClientHello we already read - backend hasn't seen it yet
-	if _, err := backendConn.Write(buf[:n]); err != nil {
+	if _, err := backendConn.Write(hello); err != nil {
 		log.Printf("[tls] [%s] Failed to forward ClientHello: %v", sni, err)
-		s.sendTLSErrorPage(conn.Conn, buf[:n], sni, tlsErrorForwarding, fmt.Sprintf("Failed to forward ClientHello: %v", err))
+		s.sendTLSErrorPage(conn.Conn, hello, sni, tlsErrorForwarding, fmt.Sprintf("Failed to forward ClientHello: %v", err))
 		return
 	}
 
 	netutil.BidirectionalCopy(backendConn, conn.Conn)
+}
+
+// readClientHello reads until it has the whole ClientHello, which can arrive in
+// several reads and span several TLS records. It returns everything it read, for
+// replaying to the backend. Its buffer is at least as large as peekConn's, so each
+// read empties peekConn and nothing is left behind. Data that cannot be a
+// ClientHello is returned as well, for extractSNI to report.
+func readClientHello(conn *peekConn) ([]byte, error) {
+	var data []byte
+	buf := make([]byte, 16384)
+	for {
+		n, err := conn.Read(buf)
+		data = append(data, buf[:n]...)
+
+		if _, parseErr := validateTLSHandshake(data); !errors.Is(parseErr, errIncompleteClientHello) {
+			return data, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > maxClientHelloSize {
+			return nil, fmt.Errorf("ClientHello larger than %d bytes", maxClientHelloSize)
+		}
+	}
 }
 
 // extractSNI parses the TLS ClientHello to find the Server Name Indication.
@@ -111,34 +139,42 @@ func extractSNI(data []byte) (string, error) {
 	return findSNIInExtensions(handshake[extStart:], extLen)
 }
 
-// validateTLSHandshake validates TLS record and ClientHello headers, returning handshake data
+// validateTLSHandshake validates TLS record and ClientHello headers, returning the
+// ClientHello handshake message reassembled from its records. It returns
+// errIncompleteClientHello if data ends before the message does.
 func validateTLSHandshake(data []byte) ([]byte, error) {
-	// TLS record: type(1) + version(2) + length(2) = 5 bytes minimum
-	if len(data) < 5 {
-		return nil, fmt.Errorf("data too short for TLS record")
-	}
+	var handshake []byte
+	for {
+		// TLS record: type(1) + version(2) + length(2) = 5 bytes minimum
+		if len(data) < 5 {
+			return nil, errIncompleteClientHello
+		}
 
-	// Check if it's a TLS handshake (0x16)
-	if data[0] != 0x16 {
-		return nil, fmt.Errorf("not a TLS handshake record")
-	}
+		// Check if it's a TLS handshake (0x16)
+		if data[0] != 0x16 {
+			return nil, fmt.Errorf("not a TLS handshake record")
+		}
 
-	recordLen := int(data[3])<<8 | int(data[4])
-	if len(data) < 5+recordLen {
-		return nil, fmt.Errorf("incomplete TLS record")
-	}
+		recordLen := int(data[3])<<8 | int(data[4])
+		if len(data) < 5+recordLen {
+			return nil, errIncompleteClientHello
+		}
+		handshake = append(handshake, data[5:5+recordLen]...)
+		data = data[5+recordLen:]
 
-	handshake := data[5:]
-	if len(handshake) < 4 {
-		return nil, fmt.Errorf("data too short for handshake header")
-	}
+		// Check if it's a ClientHello (0x01)
+		if len(handshake) > 0 && handshake[0] != 0x01 {
+			return nil, fmt.Errorf("not a ClientHello")
+		}
 
-	// Check if it's a ClientHello (0x01)
-	if handshake[0] != 0x01 {
-		return nil, fmt.Errorf("not a ClientHello")
+		// Handshake header: type(1) + length(3)
+		if len(handshake) >= 4 {
+			msgLen := 4 + (int(handshake[1])<<16 | int(handshake[2])<<8 | int(handshake[3]))
+			if len(handshake) >= msgLen {
+				return handshake[:msgLen], nil
+			}
+		}
 	}
-
-	return handshake, nil
 }
 
 // skipToExtensions skips the variable-length fields in ClientHello to find extensions
