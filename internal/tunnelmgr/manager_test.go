@@ -637,3 +637,26 @@ func TestManager_ActiveTunnels_MixedStates(t *testing.T) {
 		t.Errorf("Expected 1 active tunnel, got %d", count)
 	}
 }
+
+// A tunnel that finishes starting while cleanup looks at it must be stopped, not just dropped
+// from the map, or its port-forward keeps running with nothing to stop it.
+func TestCleanupIdleTunnels_StopsTunnelThatJustStarted(t *testing.T) {
+	cfg := testConfig(map[string]config.K8sRouteConfig{})
+	cfg.HTTP.IdleTimeout = 30 * time.Minute
+	m := NewManager(cfg)
+
+	// IsRunning still reports the start, State already reports it running
+	tun := newMockTunnel(false)
+	tun.state = tunnel.StateRunning
+	tun.idleDuration = 60 * time.Minute
+	m.tunnels["slow.localhost"] = tun
+
+	m.cleanupIdleTunnels()
+
+	if !tun.wasStopped() {
+		t.Error("tunnel removed from the map without being stopped")
+	}
+	if _, ok := m.tunnels["slow.localhost"]; ok {
+		t.Error("idle tunnel should be removed from the map")
+	}
+}
