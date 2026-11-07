@@ -15,7 +15,7 @@ import (
 type fsnotifyNotifier struct {
 	w       *fsnotify.Watcher
 	mu      sync.Mutex
-	watched map[string]bool
+	watched map[string]os.FileInfo // the directory each watch was added on
 	ev      chan struct{}
 	errs    chan error
 	done    chan struct{}
@@ -28,7 +28,7 @@ func newNotifier() (notifier, error) {
 	}
 	n := &fsnotifyNotifier{
 		w:       w,
-		watched: make(map[string]bool),
+		watched: make(map[string]os.FileInfo),
 		ev:      make(chan struct{}, 1),
 		errs:    make(chan error, 1),
 		done:    make(chan struct{}),
@@ -45,24 +45,30 @@ func (n *fsnotifyNotifier) set(dirs []string, _ string) error {
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	for dir := range n.watched {
-		if !want[dir] {
+	for dir, fi := range n.watched {
+		// inotify watches the directory, not its path, so one deleted and created again at
+		// the same path needs a new watch
+		if now, err := os.Stat(dir); !want[dir] || err != nil || !os.SameFile(fi, now) {
 			_ = n.w.Remove(dir)
 			delete(n.watched, dir)
 		}
 	}
 	var errs []error
 	for dir := range want {
-		if n.watched[dir] {
+		if _, ok := n.watched[dir]; ok {
 			continue
 		}
-		if err := n.w.Add(dir); err != nil {
+		fi, err := os.Stat(dir)
+		if err == nil {
+			err = n.w.Add(dir)
+		}
+		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				errs = append(errs, err)
 			}
 			continue
 		}
-		n.watched[dir] = true
+		n.watched[dir] = fi
 	}
 	return errors.Join(errs...)
 }

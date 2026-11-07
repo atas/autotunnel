@@ -975,3 +975,30 @@ func TestConfigWatcher_RestoreConfigKeepsNewerConfig(t *testing.T) {
 		t.Fatal("Expected RestoreConfig to put the previous config back")
 	}
 }
+
+// A directory on the way to the config can be deleted and created again, as a dotfiles tool or
+// restoring a backup does. Its parent is watched while it is gone, so the new one is watched too.
+func TestConfigWatcher_DirectoryRecreated(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dotfiles")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "cfg.yaml")
+	writeFile(t, configPath, routeConfig("initial.localhost"))
+	w := startWatcher(t, configPath, false)
+
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	expectNoReload(t, w) // the missing file is logged and the current config stays
+
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond) // let the watcher pick up the new directory
+	writeFile(t, configPath, routeConfig("recreated.localhost"))
+	expectReload(t, w, "recreated.localhost")
+
+	writeFile(t, configPath, routeConfig("edited.localhost"))
+	expectReload(t, w, "edited.localhost")
+}

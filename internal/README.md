@@ -436,7 +436,7 @@ sequenceDiagram
 
     Note over w: NewConfigWatcher()
     w->>fs: Follow the symlinks from the config path one at a time
-    w->>fs: Watch the directory of each link and of the file
+    w->>fs: Watch the directory of each link and of the file, or the nearest existing parent of one that is missing
     Note over w: macOS uses kqueue directly, so a directory's entries are not opened. Linux uses fsnotify
 
     Note over w: Start()

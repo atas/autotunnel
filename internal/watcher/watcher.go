@@ -172,6 +172,15 @@ func resolveChain(path string) chain {
 		if dir := filepath.Dir(path); !seen[dir] {
 			seen[dir] = true
 			c.dirs = append(c.dirs, dir)
+			// A missing directory can't be watched, so its nearest existing parent is, to see it
+			// come back. Missing ones in between are skipped by the notifier.
+			for d := dir; !exists(d) && filepath.Dir(d) != d; {
+				d = filepath.Dir(d)
+				if !seen[d] {
+					seen[d] = true
+					c.dirs = append(c.dirs, d)
+				}
+			}
 		}
 
 		fi, err := os.Lstat(path)
@@ -190,6 +199,11 @@ func resolveChain(path string) chain {
 		}
 		path = target
 	}
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // snapshot changes when the config does: a symlink moved, or the file was written, replaced or removed.
