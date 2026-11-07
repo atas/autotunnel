@@ -22,6 +22,15 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
+// jumpCloseGrace is how long a jump connection stays open without traffic after
+// one direction has ended. A client can half-close and still wait for a response,
+// and that cannot be told apart from a full close, so this is the only limit on
+// that wait. socat gets the same value as its -t.
+const jumpCloseGrace = 30 * time.Second
+
+// jumpPodPollInterval is how often a pod being deleted is checked for removal.
+const jumpPodPollInterval = 1 * time.Second
+
 // JumpHandler forwards TCP via kubectl exec + socat into a pod.
 // Used for reaching VPC-internal services like RDS through a jump pod.
 type JumpHandler struct {
@@ -120,7 +129,7 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	connWrapper := &connReadWriter{conn: conn, ctx: execCtx, cancel: cancel}
+	connWrapper := &connReadWriter{conn: conn, ctx: execCtx, cancel: cancel, graceDur: jumpCloseGrace}
 
 	// Log successful tunnel start (non-verbose, matches TCP tunnel behavior)
 	log.Printf("Jump tunnel started: :%d via %s/%s -> %s:%d",
@@ -128,7 +137,7 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 
 	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
 		Stdin:  connWrapper,
-		Stdout: conn,
+		Stdout: connWrapper,
 		Stderr: stderrWriter,
 	})
 
@@ -146,10 +155,14 @@ func (h *JumpHandler) HandleConnection(ctx context.Context, conn net.Conn, local
 }
 
 type connReadWriter struct {
-	conn   net.Conn
-	ctx    context.Context
-	cancel context.CancelFunc
-	once   sync.Once
+	conn     net.Conn
+	ctx      context.Context
+	cancel   context.CancelFunc
+	once     sync.Once
+	graceDur time.Duration
+
+	mu    sync.Mutex
+	grace *time.Timer // set once one direction has ended
 }
 
 func (c *connReadWriter) Read(p []byte) (int, error) {
@@ -160,14 +173,49 @@ func (c *connReadWriter) Read(p []byte) (int, error) {
 	}
 
 	n, err := c.conn.Read(p)
-	if err != nil {
+	if err == io.EOF {
+		// client-go closes the remote stdin on EOF. The response can still come.
+		c.startGrace()
+	} else if err != nil {
 		c.once.Do(c.cancel)
 	}
 	return n, err
 }
 
 func (c *connReadWriter) Write(p []byte) (int, error) {
-	return c.conn.Write(p)
+	n, err := c.conn.Write(p)
+	if err != nil {
+		c.once.Do(c.cancel)
+		return n, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.grace != nil {
+		c.grace.Reset(c.graceDur)
+	}
+	return n, nil
+}
+
+// ReadFrom is what client-go's io.Copy calls for stdout, and the only way to see
+// stdout end while the remote process lives on. socat stays up for its -t period
+// after the target closes, so the client has to be told here.
+func (c *connReadWriter) ReadFrom(r io.Reader) (int64, error) {
+	n, err := io.Copy(struct{ io.Writer }{c}, r)
+	if err == nil {
+		if tc, ok := c.conn.(*net.TCPConn); ok {
+			_ = tc.CloseWrite()
+		}
+		c.startGrace()
+	}
+	return n, err
+}
+
+func (c *connReadWriter) startGrace() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.grace == nil {
+		c.grace = time.AfterFunc(c.graceDur, c.cancel)
+	}
 }
 
 func (h *JumpHandler) discoverJumpPod(ctx context.Context) (podName string, containerName string, err error) {
@@ -211,12 +259,28 @@ func (h *JumpHandler) buildForwardCommand() (string, error) {
 		host = "[" + host + "]"
 	}
 
-	// try socat first (handles binary better), fall back to nc
+	// prefer socat (handles binary better), use nc only if socat is not installed.
+	// Deciding up front means a failed socat ends the session instead of nc silently
+	// opening a new connection to the target, and exec leaves no shell in between.
+	// shut-close makes socat close stdout when the target closes; the plain "-" address
+	// keeps it open for all of -t. See connReadWriter.ReadFrom.
 	// stderr is captured for error logging (connection refused, etc.)
-	return fmt.Sprintf("socat - TCP:%s:%d || nc %s %d", host, port, host, port), nil
+	graceSeconds := int(jumpCloseGrace / time.Second)
+	socatTarget := fmt.Sprintf("TCP:%s:%d", host, port)
+	return fmt.Sprintf("if command -v socat >/dev/null 2>&1; then exec socat -t %d 'STDIN!!STDOUT,shut-close' %s; else exec nc %s %d; fi",
+		graceSeconds, shellQuote(socatTarget), shellQuote(host), port), nil
 }
 
-// ensureJumpPodExists checks if the jump pod exists, and creates it if via.create is configured
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// ensureJumpPodExists returns once the jump pod is ready when via.create is configured,
+// creating it if missing and replacing it if it has finished or is being deleted.
+//
+// Each connection runs this on its own, and other machines can share the pod, so every
+// step has to cope with someone else getting there first: Create can find the pod already
+// there, and Delete only applies to the exact pod that was seen to be dead.
 func (h *JumpHandler) ensureJumpPodExists(ctx context.Context) error {
 	// If no create config, nothing to do
 	if h.route.Via.Create == nil {
@@ -225,46 +289,64 @@ func (h *JumpHandler) ensureJumpPodExists(ctx context.Context) error {
 
 	podName := h.route.Via.Pod
 	namespace := h.route.Namespace
+	pods := h.clientset.CoreV1().Pods(namespace)
 
-	// Check if pod already exists
-	_, err := h.clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
-	if err == nil {
-		// Pod already exists
-		if h.verbose {
-			log.Printf("[jump] Pod %s/%s already exists", namespace, podName)
-		}
-		return nil
-	}
-
-	if !errors.IsNotFound(err) {
-		return fmt.Errorf("failed to check if pod exists: %w", err)
-	}
-
-	// Pod doesn't exist, create it
-	log.Printf("[jump] Creating jump pod %s/%s (image: %s)...", namespace, podName, h.route.Via.Create.Image)
-
-	pod := h.buildJumpPodSpec()
-	_, err = h.clientset.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
-	if err != nil {
-		// Check if it was created by another request in the meantime
-		if errors.IsAlreadyExists(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to create jump pod: %w", err)
-	}
-
-	// Wait for pod to be ready
 	timeout := 60 * time.Second // default
-	if h.route.Via.Create != nil && h.route.Via.Create.Timeout > 0 {
+	if h.route.Via.Create.Timeout > 0 {
 		timeout = h.route.Via.Create.Timeout
 	}
-	if err := k8sutil.WaitForPodReady(ctx, h.clientset, h.route.Namespace, podName, timeout); err != nil {
-		return fmt.Errorf("jump pod not ready: %w", err)
+	deadline := time.Now().Add(timeout)
+
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("jump pod %s/%s not ready after %s", namespace, podName, timeout)
+		}
+
+		pod, err := pods.Get(ctx, podName, metav1.GetOptions{})
+		switch {
+		case errors.IsNotFound(err):
+			log.Printf("[jump] Creating jump pod %s/%s (image: %s)...", namespace, podName, h.route.Via.Create.Image)
+			_, err := pods.Create(ctx, h.buildJumpPodSpec(), metav1.CreateOptions{})
+			if err != nil && !errors.IsAlreadyExists(err) {
+				return fmt.Errorf("failed to create jump pod: %w", err)
+			}
+
+		case err != nil:
+			return fmt.Errorf("failed to check if pod exists: %w", err)
+
+		case pod.DeletionTimestamp != nil:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(jumpPodPollInterval):
+			}
+
+		case pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded:
+			// The name came from the user's config, so it may be someone else's pod
+			if pod.Labels["app.kubernetes.io/managed-by"] != "autotunnel" {
+				return fmt.Errorf("jump pod %s/%s has %s and was not created by autotunnel, delete it to continue", namespace, podName, pod.Status.Phase)
+			}
+			log.Printf("[jump] Replacing jump pod %s/%s (%s)", namespace, podName, pod.Status.Phase)
+			err := pods.Delete(ctx, podName, metav1.DeleteOptions{Preconditions: metav1.NewUIDPreconditions(string(pod.UID))})
+			if err != nil && !errors.IsNotFound(err) && !errors.IsConflict(err) {
+				return fmt.Errorf("failed to delete dead jump pod: %w", err)
+			}
+
+		default:
+			err := k8sutil.WaitForPodReady(ctx, h.clientset, namespace, podName, remaining)
+			if err == nil {
+				return nil
+			}
+			if ctx.Err() != nil {
+				return fmt.Errorf("jump pod not ready: %w", err)
+			}
+			// It timed out, or the pod failed or went away meanwhile: check again.
+			if h.verbose {
+				log.Printf("[jump] Jump pod %s/%s: %v", namespace, podName, err)
+			}
+		}
 	}
-
-	log.Printf("[jump] Created jump pod %s/%s", namespace, podName)
-
-	return nil
 }
 
 // buildJumpPodSpec builds the Pod manifest for the jump pod
@@ -327,4 +409,3 @@ func isConnectionError(msg string) bool {
 	}
 	return false
 }
-
