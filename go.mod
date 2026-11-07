@@ -1,6 +1,6 @@
 module github.com/atas/autotunnel
 
-go 1.26.0
+go 1.26.10
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1

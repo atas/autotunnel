@@ -7,6 +7,10 @@ import (
 	"github.com/atas/autotunnel/internal/tunnel"
 )
 
+// ErrTunnelFailed is what Start returns for a tunnel that failed after the manager handed it
+// out. Asking the manager again gives its replacement.
+var ErrTunnelFailed = tunnel.ErrFailed
+
 type TunnelHandle interface {
 	IsRunning() bool
 	Start(ctx context.Context) error
@@ -14,6 +18,9 @@ type TunnelHandle interface {
 	LocalPort() int
 	Scheme() string
 	Touch()
+	Acquire()
+	Release()
+	ActiveConns() int
 	IdleDuration() time.Duration
 	State() tunnel.State
 	LastError() error

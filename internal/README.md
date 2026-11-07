@@ -360,7 +360,7 @@ sequenceDiagram
 |------|---------|
 | `tunnel.go` | `Tunnel` struct, state machine, `Start()`/`Stop()`/`awaitReady()` |
 | `port_forward.go` | `discoverTargetPod()`, `createPortForwarder()`, `waitForReady()` - uses `k8sutil` for resolution |
-| `operations.go` | `Touch()`, `IdleDuration()`, `LocalPort()`, `Scheme()`, accessor methods |
+| `operations.go` | `Touch()`, `Acquire()`, `Release()`, `IdleDuration()`, `LocalPort()`, `Scheme()`, accessor methods |
 
 ---
 
@@ -406,7 +406,7 @@ sequenceDiagram
         ops->>ops: cleanupIdleTunnels()
         ops->>ops: Check HTTP tunnels
         ops->>ops: Check TCP tunnels
-        Note over ops: Stop tunnels exceeding idle_timeout
+        Note over ops: Stop tunnels past idle_timeout with no active connections
     end
 
     caller->>mgr: Shutdown()
@@ -487,10 +487,10 @@ sequenceDiagram
     participant k8s as Kubernetes API
 
     caller->>cf: GetClientForContext(paths, ctx)
-    cf->>cf: Check cache
-    alt Cached
+    cf->>cf: Look up kubeconfig files + context
+    alt Cached and the kubeconfig files unchanged
         cf-->>caller: clientset, restConfig
-    else Not cached
+    else Not cached, or a kubeconfig file changed
         cf->>k8s: Build REST config
         cf->>k8s: Create clientset
         cf->>cf: Cache client
@@ -519,7 +519,7 @@ sequenceDiagram
 
 | File | Purpose |
 |------|---------|
-| `client.go` | `ClientFactory` - caches Kubernetes clients per context |
+| `client.go` | `ClientFactory` - caches Kubernetes clients per kubeconfig files and context, rebuilt when the files change |
 | `pod.go` | `FindReadyPod()`, `WaitForPodReady()` - pod discovery utilities |
 | `service.go` | `GetService()`, `ResolveServicePort()`, `ResolveNamedPort()` - service utilities |
 
@@ -570,7 +570,7 @@ main.go
     │         │                  │
     ▼         ▼                  │
 ┌───────┐ ┌────────┐             │
-│Running│ │ Failed │─────────────┤
+│Running│ │ Failed │             │
 └───┬───┘ └────────┘             │
     │         ▲                  │
     │ Stop()  │ error            │
@@ -589,6 +589,10 @@ When multiple goroutines call `Start()` concurrently:
    - `StateRunning`: returns success
    - `StateFailed`: returns the stored error
    - `StateIdle`: retries `Start()` (first caller failed, cleaned up)
+
+**Failed is final:**
+
+`Start()` on a failed tunnel returns an error. The manager replaces it on the next `GetOrCreateTunnel()`.
 
 **State Preservation:**
 
