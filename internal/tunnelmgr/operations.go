@@ -74,7 +74,7 @@ func (m *Manager) cleanupIdleHTTPTunnels() {
 	defer m.mu.Unlock()
 
 	for hostname, tunnel := range m.tunnels {
-		if tunnel.IsRunning() && tunnel.IdleDuration() > m.config.HTTP.IdleTimeout {
+		if tunnel.IsRunning() && tunnel.ActiveConns() == 0 && tunnel.IdleDuration() > m.config.HTTP.IdleTimeout {
 			idleDur := tunnel.IdleDuration().Round(time.Second)
 			log.Printf("Tunnel stopped: %s://%s%s (idle for %v)",
 				tunnel.Scheme(), hostname, m.config.HTTP.ListenAddr, idleDur)
@@ -95,7 +95,7 @@ func (m *Manager) cleanupIdleTCPTunnels() {
 	}
 
 	for port, tunnel := range m.tcpTunnels {
-		if tunnel.IsRunning() && tunnel.IdleDuration() > tcpIdleTimeout {
+		if tunnel.IsRunning() && tunnel.ActiveConns() == 0 && tunnel.IdleDuration() > tcpIdleTimeout {
 			target := m.config.TCP.K8s.Routes[port]
 			idleDur := tunnel.IdleDuration().Round(time.Second)
 			log.Printf("Tunnel stopped: tcp://localhost:%d -> %s/%s (idle for %v)",
