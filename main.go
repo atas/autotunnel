@@ -74,6 +74,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config from %s: %v", configPath, err)
 	}
+	if verbose {
+		cfg.Verbose = true
+	}
 
 	var configWatcher *watcher.ConfigWatcher
 	if cfg.ShouldAutoReload() {
@@ -86,12 +89,24 @@ func main() {
 		}
 	}
 
-	// Main run loop - restart on config changes
+	if err := run(configPath, cfg, configWatcher, sigChan); err != nil {
+		log.Fatalf("Failed to start: %v", err)
+	}
+
+	log.Println("Shutdown complete")
+}
+
+// run serves the config until a signal arrives, restarting whenever the watcher reports a change.
+// It returns an error only when a config cannot start and there is no earlier one to go back to.
+func run(configPath string, cfg *config.Config, configWatcher *watcher.ConfigWatcher, sigChan <-chan os.Signal) error {
+	// The config to go back to if the next start fails. Nil at first start and right after going back.
+	var fallback *config.Config
+
 	for {
-		app, err := initializeApp(configPath, verbose, configWatcher)
-		if err != nil {
-			log.Fatalf("Failed to initialize: %v", err)
+		if configWatcher != nil {
+			cfg = configWatcher.GetConfig()
 		}
+		app := initializeApp(cfg)
 
 		printConfigInfo(configPath, app.cfg)
 
@@ -99,31 +114,42 @@ func main() {
 		app.manager.Start()
 
 		serverErrChan := make(chan error, 1)
-		go func() {
-			if err := app.httpServer.Start(); err != nil {
-				serverErrChan <- err
-			}
-		}()
 
+		// Both bind before anything runs in the background, so a busy port is reported here, and
+		// a reload that is already waiting shuts down listeners that exist. HTTP is not bound if
+		// TCP failed, as it would only be shut down again.
 		if app.tcpServer != nil {
 			if err := app.tcpServer.Start(); err != nil {
-				shutdownApp(app, context.Background())
-				log.Fatalf("Failed to start TCP server: %v", err)
+				serverErrChan <- fmt.Errorf("TCP server: %w", err)
+			}
+		}
+		if len(serverErrChan) == 0 {
+			if err := app.httpServer.Listen(); err != nil {
+				serverErrChan <- err
+			} else {
+				go func() {
+					if err := app.httpServer.Serve(); err != nil {
+						serverErrChan <- err
+					}
+				}()
 			}
 		}
 
 		// Wait for signal or config reload
 		shouldExit := false
+		var startErr error
 		select {
 		case sig := <-sigChan:
 			log.Printf("Received signal %v, shutting down...", sig)
 			shouldExit = true
 
-		case err := <-serverErrChan:
-			log.Fatalf("Server error: %v", err)
+		case startErr = <-serverErrChan:
 
 		case <-getReloadChan(configWatcher):
 			log.Println("Config changed, restarting...")
+			if len(serverErrChan) == 0 {
+				fallback = app.cfg
+			}
 		}
 
 		// Shutdown current instance
@@ -132,14 +158,25 @@ func main() {
 		cancel()
 
 		if shouldExit {
-			break
+			return nil
+		}
+
+		if startErr != nil {
+			if fallback == nil {
+				return startErr
+			}
+			if configWatcher.RestoreConfig(app.cfg, fallback) {
+				log.Printf("Failed to start with new config: %v (restoring previous config)", startErr)
+				fallback = nil
+			} else {
+				// A newer config came in while this one failed: try it, and keep fallback for it
+				log.Printf("Failed to start with new config: %v (trying the newer config)", startErr)
+			}
 		}
 
 		// Small delay before restart to let ports release
 		time.Sleep(100 * time.Millisecond)
 	}
-
-	log.Println("Shutdown complete")
 }
 
 func printBanner() {
@@ -156,25 +193,7 @@ On-demand Port Forwarding
 https://github.com/atas/autotunnel`)
 }
 
-func initializeApp(configPath string, cliVerbose bool, configWatcher *watcher.ConfigWatcher) (*appComponents, error) {
-	var cfg *config.Config
-	var err error
-
-	// Get config from watcher if available (it has the validated latest config)
-	if configWatcher != nil {
-		cfg = configWatcher.GetConfig()
-	} else {
-		cfg, err = config.LoadConfig(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load config: %w", err)
-		}
-	}
-
-	// Apply CLI verbose flag
-	if cliVerbose || (configWatcher != nil && configWatcher.CLIVerbose()) {
-		cfg.Verbose = true
-	}
-
+func initializeApp(cfg *config.Config) *appComponents {
 	// systemd/launchd run with minimal PATH, so we add common tool locations
 	config.ExpandExecPath(cfg.ExecPath)
 	if cfg.Verbose {
@@ -194,7 +213,7 @@ func initializeApp(configPath string, cliVerbose bool, configWatcher *watcher.Co
 		manager:    manager,
 		httpServer: httpServer,
 		tcpServer:  tcpServer,
-	}, nil
+	}
 }
 
 func shutdownApp(app *appComponents, ctx context.Context) {

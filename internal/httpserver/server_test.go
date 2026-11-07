@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -460,4 +461,39 @@ func TestMuxListener_HTTPListener(t *testing.T) {
 	if httpLis.Addr() == nil {
 		t.Error("httpListener.Addr() returned nil")
 	}
+}
+
+// Shutdown right after Listen, before Serve has run, must still free the port.
+func TestServer_ShutdownAfterListenFreesPort(t *testing.T) {
+	cfg := testHTTPConfig()
+	cfg.HTTP.ListenAddr = "127.0.0.1:0"
+	l, err := net.Listen("tcp", cfg.HTTP.ListenAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.HTTP.ListenAddr = l.Addr().String()
+	_ = l.Close()
+
+	s := NewServer(cfg, &retryMockManager{})
+	if err := s.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Shutdown(context.Background())
+
+	served := make(chan error, 1)
+	go func() { served <- s.Serve() }()
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Errorf("Serve after Shutdown = %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after Shutdown")
+	}
+
+	l, err = net.Listen("tcp", cfg.HTTP.ListenAddr)
+	if err != nil {
+		t.Fatalf("port still held after Shutdown: %v", err)
+	}
+	_ = l.Close()
 }

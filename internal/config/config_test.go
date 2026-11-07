@@ -1,12 +1,95 @@
 package config
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+// loadWithLogs loads content as a config file and returns what LoadConfig logged.
+func loadWithLogs(t *testing.T, content string) (*Config, string, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "cfg.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+	cfg, err := LoadConfig(path)
+	return cfg, logs.String(), err
+}
+
+func TestLoadConfig_WarnsAboutUnknownKeys(t *testing.T) {
+	cfg, logs, err := loadWithLogs(t, `apiVersion: autotunnel/v1
+auto_reload_confg: false
+http:
+  listen: "127.0.0.1:8989"
+  idle_timeout: 60m
+  k8s:
+    dyanmic_host: k8s.localhost
+    routes:
+      app.localhost:
+        context: test
+        namespace: default
+        service: app
+        prot: 80
+        port: 80
+tpc:
+  idle_timeout: 60m
+`)
+	if err != nil {
+		t.Fatalf("Unknown keys must not fail the load: %v", err)
+	}
+	if len(cfg.HTTP.K8s.Routes) != 1 {
+		t.Errorf("Expected known keys to still load, got routes %v", cfg.HTTP.K8s.Routes)
+	}
+	for _, want := range []string{
+		"line 2: field auto_reload_confg",
+		"line 7: field dyanmic_host",
+		"line 13: field prot",
+		"line 15: field tpc",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("Expected a warning with %q, got: %s", want, logs)
+		}
+	}
+}
+
+func TestLoadConfig_NoWarningsForKnownKeys(t *testing.T) {
+	if _, logs, err := loadWithLogs(t, defaultConfigTemplate); err != nil || logs != "" {
+		t.Errorf("Default config: err=%v logs=%q", err, logs)
+	}
+}
+
+func TestLoadConfig_EmptyFile(t *testing.T) {
+	for name, content := range map[string]string{
+		"empty":         "",
+		"comments only": "# nothing here\n",
+		"null document": "---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, logs, err := loadWithLogs(t, content)
+			if err == nil || !strings.Contains(err.Error(), "http.listen is required") {
+				t.Errorf("Expected the http.listen error, got: %v", err)
+			}
+			if logs != "" {
+				t.Errorf("Expected no warnings, got: %s", logs)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_WrongTypeStillFails(t *testing.T) {
+	_, _, err := loadWithLogs(t, "http:\n  idle_timeout: [not, a, duration]\n")
+	if err == nil || !strings.Contains(err.Error(), "failed to parse config file") {
+		t.Errorf("Expected a parse error, got: %v", err)
+	}
+}
 
 func TestValidate_ApiVersion(t *testing.T) {
 	tests := []struct {

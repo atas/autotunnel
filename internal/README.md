@@ -39,17 +39,20 @@ sequenceDiagram
     end
 
     loop Main run loop
-        main->>http: Start() [goroutine]
-        Note over http: Listens on :8989
-
         alt TCP server exists
             main->>tcp: Start()
             Note over tcp: Starts port listeners
         end
 
+        main->>http: Listen()
+        Note over http: Binds :8989, unless TCP failed
+        main->>http: Serve() [goroutine]
+
         main->>main: Wait for signal or reload
         alt SIGINT/SIGTERM received
             main->>main: Shutdown and exit loop
+        else Start failed
+            main->>main: Exit at first start, otherwise restore the previous config and continue loop
         else Config file changed
             main->>main: Shutdown all components
             main->>main: Continue loop (restart)
@@ -136,6 +139,8 @@ sequenceDiagram
 
     watch->>cfg: LoadConfig(path)
     cfg-->>watch: *Config (validated)
+
+    Note over watch: Stop here if unchanged, or a new port is busy
 
     watch->>watch: Store new config
     watch->>main: Signal via ReloadChan
@@ -431,24 +436,25 @@ sequenceDiagram
     participant main as main.go
 
     Note over w: NewConfigWatcher()
-    w->>fs: fsnotify.Add(configPath)
+    w->>fs: Follow the symlinks from the config path one at a time
+    w->>fs: Watch the directory of each link and of the file, or the nearest existing parent of one that is missing
+    Note over w: macOS uses kqueue directly, so a directory's entries are not opened. Linux uses fsnotify
 
     Note over w: Start()
     w->>w: watchLoop() [goroutine]
 
     loop Watch events
-        fs->>w: Write/Create/Rename event
+        fs->>w: Something changed in a watched directory or the file
+        w->>fs: Follow the symlinks again, watch any new directory or replaced file
 
-        alt Rename (vim/nano atomic save)
-            w->>fs: Remove + Add watch
-            Note over w: Re-watch new inode
-        end
-
-        w->>w: Debounce timer (500ms)
+        Note over w: Ignore the event if the links, size and modified time are as at the last event
+        w->>w: Debounce timer (500ms), restarted only by events that changed them
+        Note over w: Stop here if they are as at the last load
         w->>w: reloadConfig()
         w->>cfg: LoadConfig(path)
         cfg-->>w: *Config (validated)
 
+        Note over w: Stop here if unchanged, or a new port is busy
         w->>w: Store validated config
         w->>main: Signal ReloadChan
         Note over main: Triggers restart loop
@@ -456,12 +462,14 @@ sequenceDiagram
 
     Note over w: Stop()
     w->>w: close(stopChan)
-    w->>fs: watcher.Close()
+    w->>fs: Close the watches
 ```
 
 | File | Purpose |
 |------|---------|
-| `watcher.go` | `ConfigWatcher` struct, fsnotify integration, debouncing, `ReloadChan` signaling |
+| `watcher.go` | `ConfigWatcher` struct, symlink chain, debouncing, `ReloadChan` signaling |
+| `notify_kqueue.go` | macOS: kqueue on the directories and the file, without opening directory entries |
+| `notify_fsnotify.go` | Other platforms: fsnotify directory watches |
 
 ---
 

@@ -38,7 +38,17 @@ func NewServer(cfg *config.Config, mgr Manager) *Server {
 	}
 }
 
+// Start listens and then serves until Shutdown.
 func (s *Server) Start() error {
+	if err := s.Listen(); err != nil {
+		return err
+	}
+	return s.Serve()
+}
+
+// Listen binds the address. Run it before Serve goes to the background, so that a busy
+// port is reported at once and a Shutdown that comes right after closes the listener.
+func (s *Server) Listen() error {
 	mux, err := newMuxListener(s.config.HTTP.ListenAddr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.config.HTTP.ListenAddr, err)
@@ -52,7 +62,12 @@ func (s *Server) Start() error {
 		ReadHeaderTimeout: HTTPReadHeaderTimeout,
 		IdleTimeout:       120 * time.Second,
 	}
+	return nil
+}
 
+// Serve handles connections on the listener from Listen until Shutdown.
+func (s *Server) Serve() error {
+	mux := s.listener
 	go func() {
 		err := s.server.Serve(mux.httpListener())
 		// these errors are expected during shutdown, don't spam the logs
