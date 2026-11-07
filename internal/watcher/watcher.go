@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,10 +89,13 @@ func NewConfigWatcher(configPath string, initialConfig *config.Config, cliVerbos
 func (cw *ConfigWatcher) logWatchError(err error) {
 	msg := ""
 	if err != nil {
-		msg = err.Error()
+		// set joins one error per path in map order, so sort them to compare
+		lines := strings.Split(err.Error(), "\n")
+		sort.Strings(lines)
+		msg = strings.Join(lines, "\n")
 	}
 	if msg != "" && msg != cw.lastWatchErr {
-		log.Printf("Config watcher: can't watch %v (changes there won't trigger a reload)", err)
+		log.Printf("Config watcher: can't watch %s (changes there won't trigger a reload)", msg)
 	}
 	cw.lastWatchErr = msg
 }

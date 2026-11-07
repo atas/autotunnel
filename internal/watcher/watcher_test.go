@@ -1036,10 +1036,50 @@ func TestConfigWatcher_UnwatchableDirectoryKeepsTheRest(t *testing.T) {
 	writeFile(t, filepath.Join(linkDir, "other1"), "x")
 	writeFile(t, filepath.Join(linkDir, "other2"), "x")
 	expectNoReload(t, w)
-	if n := strings.Count(logs.String(), "can't watch"); n > 1 {
+	if n := strings.Count(logs.String(), "can't watch"); n != 1 {
 		t.Errorf("watch error logged %d times, want once: %s", n, logs.String())
 	}
 
 	retarget(t, configPath, filepath.Join(open, "cfg.yaml"))
 	expectReload(t, w, "open.localhost")
+}
+
+// With more than one directory that can't be watched, the errors come back in map order. They
+// are still logged only once.
+func TestConfigWatcher_SeveralUnwatchableDirectoriesLoggedOnce(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can open any directory")
+	}
+	root := t.TempDir()
+	linkDir, locked1, locked2 := filepath.Join(root, "links"), filepath.Join(root, "locked1"), filepath.Join(root, "locked2")
+	for _, dir := range []string{linkDir, locked1, locked2} {
+		if err := os.Mkdir(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(locked2, "cfg.yaml"), routeConfig("locked.localhost"))
+	if err := os.Symlink(filepath.Join(locked2, "cfg.yaml"), filepath.Join(locked1, "cfg.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(linkDir, "cfg.yaml")
+	if err := os.Symlink(filepath.Join(locked1, "cfg.yaml"), configPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{locked1, locked2} {
+		if err := os.Chmod(dir, 0111); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+	}
+	logs := captureLog(t)
+	_ = startWatcher(t, configPath, false)
+
+	for i := range 8 {
+		writeFile(t, filepath.Join(linkDir, fmt.Sprintf("other%d", i)), "x")
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if n := strings.Count(logs.String(), "can't watch"); n != 1 {
+		t.Errorf("watch errors logged %d times, want once: %s", n, logs.String())
+	}
 }
