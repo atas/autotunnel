@@ -256,3 +256,35 @@ func TestHandleTLSConnection_StaleFailedTunnelUsesReplacement(t *testing.T) {
 		t.Errorf("replacement ActiveConns after = %d, want 0", got)
 	}
 }
+
+// The retry after a failed proxy can be handed a tunnel that another request has failed since.
+// It gets the next replacement too.
+func TestServeHTTP_RetryStaleFailedTunnelUsesReplacement(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer backend.Close()
+
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadPort := closed.Addr().(*net.TCPAddr).Port
+	_ = closed.Close()
+
+	dead := &retryMockTunnel{running: true, localPort: deadPort, scheme: "http"}
+	fresh := &countingTunnel{localPort: backend.Listener.Addr().(*net.TCPAddr).Port}
+	mgr := &seqManager{tunnels: []tunnelmgr.TunnelHandle{dead, &staleTunnel{}, fresh}}
+	front := httptest.NewServer(NewServer(testHTTPConfig(), mgr))
+	defer front.Close()
+
+	resp, err := http.Get(front.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if mgr.calls != 3 {
+		t.Errorf("GetOrCreateTunnel calls = %d, want 3", mgr.calls)
+	}
+}
