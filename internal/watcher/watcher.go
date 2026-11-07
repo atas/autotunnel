@@ -43,6 +43,8 @@ type ConfigWatcher struct {
 
 	stopChan chan struct{}
 	doneChan chan struct{}
+
+	lastWatchErr string // logged once, not again on every event
 }
 
 func NewConfigWatcher(configPath string, initialConfig *config.Config, cliVerbose bool) (*ConfigWatcher, error) {
@@ -73,13 +75,24 @@ func NewConfigWatcher(configPath string, initialConfig *config.Config, cliVerbos
 
 	// Watching only the file would lose it when a save replaces the file, so its directory is watched
 	// too, and the directory of every symlink on the way to it
+	// A directory that can't be watched (no read permission, or macOS privacy protection) is
+	// logged and skipped, and the others are still watched
 	chain := resolveChain(cw.watchPath)
-	if err := n.set(chain.dirs, chain.file); err != nil {
-		n.close()
-		return nil, err
-	}
+	cw.logWatchError(n.set(chain.dirs, chain.file))
 	cw.lastSnapshot = chain.snapshot()
 	return cw, nil
+}
+
+// logWatchError logs err from setting up the watches, unless it is the one logged last time.
+func (cw *ConfigWatcher) logWatchError(err error) {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	if msg != "" && msg != cw.lastWatchErr {
+		log.Printf("Config watcher: can't watch %v (changes there won't trigger a reload)", err)
+	}
+	cw.lastWatchErr = msg
 }
 
 func (cw *ConfigWatcher) Start() {
@@ -126,9 +139,7 @@ func (cw *ConfigWatcher) watchLoop() {
 		case <-cw.notifier.events():
 			// Follow a replaced file or a moved symlink at once, so the next edit is seen too
 			chain := resolveChain(cw.watchPath)
-			if err := cw.notifier.set(chain.dirs, chain.file); err != nil {
-				log.Printf("Config watcher error: %v", err)
-			}
+			cw.logWatchError(cw.notifier.set(chain.dirs, chain.file))
 			if snapshot := chain.snapshot(); snapshot != seen {
 				seen = snapshot
 				scheduleReload()

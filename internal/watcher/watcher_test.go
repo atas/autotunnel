@@ -1002,3 +1002,44 @@ func TestConfigWatcher_DirectoryRecreated(t *testing.T) {
 	writeFile(t, configPath, routeConfig("edited.localhost"))
 	expectReload(t, w, "edited.localhost")
 }
+
+// A directory on the way to the config that can't be watched (execute-only here, or kept by
+// macOS privacy protection) is logged once and skipped. The rest is still watched.
+func TestConfigWatcher_UnwatchableDirectoryKeepsTheRest(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can open any directory")
+	}
+	root := t.TempDir()
+	linkDir := filepath.Join(root, "links")
+	locked := filepath.Join(root, "locked")
+	open := filepath.Join(root, "open")
+	for _, dir := range []string{linkDir, locked, open} {
+		if err := os.Mkdir(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(locked, "cfg.yaml"), routeConfig("locked.localhost"))
+	writeFile(t, filepath.Join(open, "cfg.yaml"), routeConfig("open.localhost"))
+	if err := os.Chmod(locked, 0111); err != nil { // can be passed through, not listed
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0755) })
+
+	configPath := filepath.Join(linkDir, "cfg.yaml")
+	if err := os.Symlink(filepath.Join(locked, "cfg.yaml"), configPath); err != nil {
+		t.Fatal(err)
+	}
+	logs := captureLog(t)
+	w := startWatcher(t, configPath, false)
+
+	// Events in the watched directory set up the watches again, which fails again
+	writeFile(t, filepath.Join(linkDir, "other1"), "x")
+	writeFile(t, filepath.Join(linkDir, "other2"), "x")
+	expectNoReload(t, w)
+	if n := strings.Count(logs.String(), "can't watch"); n > 1 {
+		t.Errorf("watch error logged %d times, want once: %s", n, logs.String())
+	}
+
+	retarget(t, configPath, filepath.Join(open, "cfg.yaml"))
+	expectReload(t, w, "open.localhost")
+}

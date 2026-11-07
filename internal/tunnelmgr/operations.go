@@ -82,13 +82,17 @@ func (m *Manager) cleanupIdleHTTPTunnels() {
 		if tun.IdleDuration() <= m.config.HTTP.IdleTimeout || tun.ActiveConns() > 0 {
 			continue
 		}
-		if tun.IsRunning() {
+		// Read once: a tunnel that finished starting between two reads would be dropped
+		// from the map without Stop, leaving its port-forward running
+		switch tun.State() {
+		case tunnel.StateRunning:
 			idleDur := tun.IdleDuration().Round(time.Second)
 			log.Printf("Tunnel stopped: %s://%s%s (idle for %v)",
 				tun.Scheme(), hostname, m.config.HTTP.ListenAddr, idleDur)
 			tun.Stop()
 			delete(m.tunnels, hostname)
-		} else if tun.State() != tunnel.StateStarting {
+		case tunnel.StateStarting:
+		default:
 			// Never started or failed: no port-forward to stop, only a map entry.
 			// Dynamic hostnames are client-supplied, so these would pile up forever.
 			delete(m.tunnels, hostname)

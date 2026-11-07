@@ -4,6 +4,7 @@ package watcher
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 
@@ -64,7 +65,7 @@ func (n *fsnotifyNotifier) set(dirs []string, _ string) error {
 		}
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
-				errs = append(errs, err)
+				errs = append(errs, fmt.Errorf("%s: %w", dir, err))
 			}
 			continue
 		}
