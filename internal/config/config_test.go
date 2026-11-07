@@ -836,6 +836,47 @@ func TestCreateDefaultConfig(t *testing.T) {
 	}
 }
 
+// New installs must opt in to dynamic routing.
+func TestCreateDefaultConfig_DynamicRoutingIsOptIn(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "new-config.yaml")
+	if err := CreateDefaultConfig(configPath); err != nil {
+		t.Fatalf("CreateDefaultConfig failed: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.HTTP.K8s.DynamicHost != "" {
+		t.Errorf("default config enables dynamic routing with dynamic_host %q", cfg.HTTP.K8s.DynamicHost)
+	}
+	if len(cfg.HTTP.K8s.DynamicContexts) != 0 {
+		t.Errorf("default config sets dynamic_contexts %v", cfg.HTTP.K8s.DynamicContexts)
+	}
+}
+
+func TestLoadConfig_DynamicContexts(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	content := `http:
+  listen: "127.0.0.1:8989"
+  idle_timeout: 60m
+  k8s:
+    dynamic_host: k8s.localhost
+    dynamic_contexts: [dev, staging]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	got := cfg.HTTP.K8s.DynamicContexts
+	if len(got) != 2 || got[0] != "dev" || got[1] != "staging" {
+		t.Errorf("DynamicContexts = %v, want [dev staging]", got)
+	}
+}
 
 // TestValidate_JumpRoute tests validation of jump routes
 func TestValidate_JumpRoute(t *testing.T) {
