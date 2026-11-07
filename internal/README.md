@@ -44,8 +44,9 @@ sequenceDiagram
             Note over tcp: Starts port listeners
         end
 
-        main->>http: Start() [goroutine]
-        Note over http: Listens on :8989
+        main->>http: Listen()
+        Note over http: Binds :8989, unless TCP failed
+        main->>http: Serve() [goroutine]
 
         main->>main: Wait for signal or reload
         alt SIGINT/SIGTERM received
