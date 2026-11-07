@@ -24,8 +24,6 @@ type Server struct {
 	server               *http.Server
 	done                 chan struct{}
 	tlsErrorCertProvider *tlsErrorCertProvider
-	stallMin             time.Duration
-	stallMax             time.Duration
 }
 
 func NewServer(cfg *config.Config, mgr Manager) *Server {
@@ -37,8 +35,6 @@ func NewServer(cfg *config.Config, mgr Manager) *Server {
 		manager:              mgr,
 		done:                 make(chan struct{}),
 		tlsErrorCertProvider: certProvider,
-		stallMin:             PortForwardStallMin,
-		stallMax:             PortForwardStallMax,
 	}
 }
 

@@ -4,15 +4,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/atas/autotunnel/internal/tunnelmgr"
 )
@@ -52,7 +49,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	tunnel.Touch()
 
-	proxyStart := time.Now()
 	proxyErr := s.proxyRequest(w, r, host, tunnel)
 	if proxyErr == nil {
 		return
@@ -69,16 +65,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[http] [%s] Proxy error: %v", host, proxyErr)
 
 	// A failed dial means the port-forward's local listener is gone and the backend
-	// never saw the request, so get a fresh tunnel and send it again. A stall also
-	// needs a fresh tunnel, but it can't be told apart from a slow backend dropping
-	// the connection, so only send the request again if that is safe. Any other error
-	// can come from the backend, so it leaves the shared tunnel alone.
+	// never saw the request, so get a fresh tunnel and send it again. Any other error
+	// can come from the backend, so it leaves the shared tunnel alone, and the request
+	// is only sent again if that is safe. A black-holed port-forward is caught by the
+	// tunnel itself, when it fails to open a stream, so the retry gets a fresh one.
 	retry := isSafeToRepeat(r)
 	if isDialError(proxyErr) {
 		tunnel.MarkFailed(proxyErr)
 		retry = true
-	} else if s.isPortForwardStall(proxyErr, time.Since(proxyStart)) {
-		tunnel.MarkFailed(proxyErr)
 	}
 	if !retry {
 		http.Error(w, fmt.Sprintf("Proxy error for host '%s': %v", host, proxyErr), http.StatusBadGateway)
@@ -113,18 +107,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func isDialError(err error) bool {
 	var opErr *net.OpError
 	return errors.As(err, &opErr) && opErr.Op == "dial"
-}
-
-// isPortForwardStall reports whether the connection was dropped the way a black-holed
-// port-forward drops it. The SPDY connection stays open but silent, so the local
-// listener still accepts, and client-go closes the connection when it times out
-// waiting for a stream. It hasn't read the request by then, so the proxy usually sees
-// a reset rather than EOF, and no error ever reaches the tunnel's state.
-func (s *Server) isPortForwardStall(err error, elapsed time.Duration) bool {
-	if elapsed < s.stallMin || elapsed > s.stallMax {
-		return false
-	}
-	return errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
 }
 
 // isSafeToRepeat reports whether the request can be sent again after the backend

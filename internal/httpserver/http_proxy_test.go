@@ -263,11 +263,10 @@ func TestServeHTTP_DialFailureRetriesPOSTWithBody(t *testing.T) {
 	}
 }
 
-// stallingPortForward is a port-forward's local listener while its SPDY connection
-// is black-holed. It accepts, because the listener is fine, and reads nothing while
-// client-go waits for a stream. When that wait times out, it closes the connection.
-// With drain, it reads the request first, so the proxy sees EOF instead of a reset.
-func stallingPortForward(t *testing.T, stall time.Duration, drain bool) int {
+// droppingBackend accepts a connection and closes it after delay, the way a backend
+// that times out a slow request does, or a port-forward whose stream could not be
+// opened. With drain, it reads the request first, so the proxy sees EOF, not a reset.
+func droppingBackend(t *testing.T, delay time.Duration, drain bool) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -283,32 +282,17 @@ func stallingPortForward(t *testing.T, stall time.Duration, drain bool) int {
 			if drain {
 				go func() { _, _ = io.Copy(io.Discard, conn) }()
 			}
-			time.AfterFunc(stall, func() { _ = conn.Close() })
+			time.AfterFunc(delay, func() { _ = conn.Close() })
 		}
 	}()
 	return listenerPort(l)
 }
 
-func frontServerWithStallWindow(mgr Manager, minWait, maxWait time.Duration) *httptest.Server {
-	server := NewServer(testHTTPConfig(), mgr)
-	server.stallMin, server.stallMax = minWait, maxWait
-	return httptest.NewServer(server)
-}
-
-// The window has to contain what client-go waits for a stream, 30s, for the real
-// stall to be recognized. Shrunken windows stand in for it in the tests below.
-func TestNewServer_StallWindowContainsStreamTimeout(t *testing.T) {
-	s := NewServer(testHTTPConfig(), &retryMockManager{})
-	const streamTimeout = 30 * time.Second
-	if s.stallMin >= streamTimeout || s.stallMax <= streamTimeout {
-		t.Errorf("stall window %v-%v does not contain %v", s.stallMin, s.stallMax, streamTimeout)
-	}
-}
-
-// A connection dropped at the stream timeout means the port-forward is dead, so the
-// next try needs a fresh tunnel. The request is only sent again if that is safe.
-func TestServeHTTP_BlackHoledPortForwardGetsFreshTunnel(t *testing.T) {
-	const stall = 150 * time.Millisecond
+// A dropped connection can't be told apart from the backend timing the request out,
+// so it never fails the shared tunnel and its other streams. A black-holed
+// port-forward fails itself when it can't open a stream. The request is sent again
+// only if that is safe.
+func TestServeHTTP_DroppedConnectionKeepsTunnel(t *testing.T) {
 	tests := []struct {
 		name         string
 		method       string
@@ -325,17 +309,15 @@ func TestServeHTTP_BlackHoledPortForwardGetsFreshTunnel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var hits atomic.Int32
 			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				hits.Add(1)
 				_, _ = io.Copy(io.Discard, r.Body)
 			}))
 			defer backend.Close()
 
-			deadTun := runningTunnel(stallingPortForward(t, stall, tt.drain))
-			freshTun := runningTunnel(listenerPort(backend.Listener))
-			mgr := &retryMockManager{tunnels: []tunnelmgr.TunnelHandle{deadTun, freshTun}}
-			front := frontServerWithStallWindow(mgr, stall/2, time.Minute)
+			droppingTun := runningTunnel(droppingBackend(t, 100*time.Millisecond, tt.drain))
+			nextTun := runningTunnel(listenerPort(backend.Listener))
+			mgr := &retryMockManager{tunnels: []tunnelmgr.TunnelHandle{droppingTun, nextTun}}
+			front := frontServer(mgr)
 			defer front.Close()
 
 			req, err := http.NewRequest(tt.method, front.URL+"/", strings.NewReader(tt.body))
@@ -351,64 +333,26 @@ func TestServeHTTP_BlackHoledPortForwardGetsFreshTunnel(t *testing.T) {
 			if resp.StatusCode != tt.wantStatus {
 				t.Errorf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
 			}
-			if !deadTun.markedFailed {
-				t.Error("black-holed tunnel was not marked failed")
+			if droppingTun.markedFailed {
+				t.Errorf("tunnel marked failed: %v", droppingTun.failedErr)
 			}
 			if len(mgr.getCalls) != tt.wantGetCalls {
 				t.Errorf("GetOrCreateTunnel calls = %d, want %d", len(mgr.getCalls), tt.wantGetCalls)
-			}
-
-			// Whatever happened to this request, the next one must recover.
-			wantHits := hits.Load() + 1
-			resp, err = http.Get(front.URL + "/")
-			if err != nil {
-				t.Fatal(err)
-			}
-			_ = resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				t.Errorf("next request: status = %d, want 200", resp.StatusCode)
-			}
-			if hits.Load() != wantHits {
-				t.Errorf("next request: fresh backend hits = %d, want %d", hits.Load(), wantHits)
-			}
-			if freshTun.markedFailed {
-				t.Errorf("fresh tunnel marked failed: %v", freshTun.failedErr)
 			}
 		})
 	}
 }
 
-// A backend can drop a connection at any time. Only a drop at the stream timeout
-// points at the port-forward, so one later than that keeps the shared tunnel.
-func TestServeHTTP_DropAfterStallWindowKeepsTunnel(t *testing.T) {
-	tun := runningTunnel(stallingPortForward(t, 100*time.Millisecond, false))
-	front := frontServerWithStallWindow(&retryMockManager{tunnels: []tunnelmgr.TunnelHandle{tun}}, time.Millisecond, 20*time.Millisecond)
-
-	resp, err := http.Get(front.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	front.Close()
-
-	if resp.StatusCode != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502", resp.StatusCode)
-	}
-	if tun.markedFailed {
-		t.Errorf("tunnel marked failed: %v", tun.failedErr)
-	}
-}
-
-// A request body that turns out to be invalid inside the window is the client's
-// fault, not the port-forward dropping the connection.
-func TestServeHTTP_BadRequestBodyInStallWindowKeepsTunnel(t *testing.T) {
+// A request body that turns out to be invalid is the client's fault, not the
+// port-forward dropping the connection.
+func TestServeHTTP_BadRequestBodyKeepsTunnel(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 	}))
 	defer backend.Close()
 
 	tun := runningTunnel(listenerPort(backend.Listener))
-	front := frontServerWithStallWindow(&retryMockManager{tunnels: []tunnelmgr.TunnelHandle{tun}}, 0, time.Minute)
+	front := frontServer(&retryMockManager{tunnels: []tunnelmgr.TunnelHandle{tun}})
 
 	conn, err := net.Dial("tcp", front.Listener.Addr().String())
 	if err != nil {
