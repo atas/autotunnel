@@ -115,18 +115,24 @@ func run(configPath string, cfg *config.Config, configWatcher *watcher.ConfigWat
 
 		serverErrChan := make(chan error, 1)
 
-		// TCP binds before Start returns, so HTTP is not started just to be shut down again
+		// Both bind before anything runs in the background, so a busy port is reported here, and
+		// a reload that is already waiting shuts down listeners that exist. HTTP is not bound if
+		// TCP failed, as it would only be shut down again.
 		if app.tcpServer != nil {
 			if err := app.tcpServer.Start(); err != nil {
 				serverErrChan <- fmt.Errorf("TCP server: %w", err)
 			}
 		}
 		if len(serverErrChan) == 0 {
-			go func() {
-				if err := app.httpServer.Start(); err != nil {
-					serverErrChan <- err
-				}
-			}()
+			if err := app.httpServer.Listen(); err != nil {
+				serverErrChan <- err
+			} else {
+				go func() {
+					if err := app.httpServer.Serve(); err != nil {
+						serverErrChan <- err
+					}
+				}()
+			}
 		}
 
 		// Wait for signal or config reload

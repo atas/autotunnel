@@ -322,3 +322,18 @@ func TestRun_FailedRestartRestoresOldConfig(t *testing.T) {
 		})
 	}
 }
+
+// A reload can already be waiting when an instance starts, so it is shut down at once. Its HTTP
+// listener must be closed by then, or the late bind holds the port and every next start fails.
+func TestRun_ReloadWaitingAtStartFreesPorts(t *testing.T) {
+	httpPort, tcpPort := freePort(t), freePort(t)
+	app := startRun(t, testConfig(t, httpPort, tcpPort))
+	app.waitFor(t, "first start", func() bool { return isListening(httpPort) && isListening(tcpPort) })
+
+	// Each send blocks until the loop takes the previous one, so the next start finds one waiting
+	for i := 0; i < 30; i++ {
+		app.watcher.ReloadChan <- struct{}{}
+	}
+	app.waitFor(t, "ports after restarts", func() bool { return isListening(httpPort) && isListening(tcpPort) })
+	app.expectAlive(t)
+}
