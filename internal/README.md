@@ -479,10 +479,10 @@ sequenceDiagram
     participant k8s as Kubernetes API
 
     caller->>cf: GetClientForContext(paths, ctx)
-    cf->>cf: Check cache
-    alt Cached
+    cf->>cf: Look up kubeconfig files + context
+    alt Cached and the kubeconfig files unchanged
         cf-->>caller: clientset, restConfig
-    else Not cached
+    else Not cached, or a kubeconfig file changed
         cf->>k8s: Build REST config
         cf->>k8s: Create clientset
         cf->>cf: Cache client
@@ -511,7 +511,7 @@ sequenceDiagram
 
 | File | Purpose |
 |------|---------|
-| `client.go` | `ClientFactory` - caches Kubernetes clients per context |
+| `client.go` | `ClientFactory` - caches Kubernetes clients per kubeconfig files and context, rebuilt when the files change |
 | `pod.go` | `FindReadyPod()`, `WaitForPodReady()` - pod discovery utilities |
 | `service.go` | `GetService()`, `ResolveServicePort()`, `ResolveNamedPort()` - service utilities |
 
