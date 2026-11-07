@@ -455,3 +455,34 @@ func TestServeHTTP_HTTPSBackendReusesOneConnection(t *testing.T) {
 		t.Errorf("%d requests reached the backend over HTTP/2, want HTTP/1.1", got)
 	}
 }
+
+func TestIsSafeToRepeat(t *testing.T) {
+	tests := []struct {
+		name    string
+		method  string
+		body    string
+		upgrade string
+		want    bool
+	}{
+		{"GET", "GET", "", "", true},
+		{"HEAD", "HEAD", "", "", true},
+		{"GET with body", "GET", "x", "", false},
+		{"POST", "POST", "", "", false},
+		{"WebSocket upgrade", "GET", "", "websocket", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(tt.method, "/", strings.NewReader(tt.body))
+			if tt.body == "" {
+				r.ContentLength = 0
+			}
+			if tt.upgrade != "" {
+				r.Header.Set("Connection", "Upgrade")
+				r.Header.Set("Upgrade", tt.upgrade)
+			}
+			if got := isSafeToRepeat(r); got != tt.want {
+				t.Errorf("isSafeToRepeat = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -109,6 +109,10 @@ func isDialError(err error) bool {
 // isSafeToRepeat reports whether the request can be sent again after the backend
 // may have received it: it has no side effects and no body already consumed.
 func isSafeToRepeat(r *http.Request) bool {
+	// An upgrade can fail after the proxy has taken over the client's connection
+	if r.Header.Get("Upgrade") != "" {
+		return false
+	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return r.ContentLength == 0
