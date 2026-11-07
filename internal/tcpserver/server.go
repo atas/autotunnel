@@ -2,6 +2,7 @@ package tcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/atas/autotunnel/internal/config"
 	"github.com/atas/autotunnel/internal/netutil"
+	"github.com/atas/autotunnel/internal/tunnelmgr"
 )
 
 type listenerType int
@@ -139,11 +141,24 @@ func (s *Server) handleConnection(localPort int, conn net.Conn) {
 		log.Printf("[tcp:%d] Failed to get tunnel: %v", localPort, err)
 		return
 	}
+	tunnel.Acquire()
+	defer func() { tunnel.Release() }() // the tunnel in use when it returns
 
 	// Ensure tunnel is started
 	if !tunnel.IsRunning() {
 		ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
-		if err := tunnel.Start(ctx); err != nil {
+		err := tunnel.Start(ctx)
+		if errors.Is(err, tunnelmgr.ErrTunnelFailed) {
+			// Another connection saw it fail after we got it, and the manager has a replacement
+			var next tunnelmgr.TunnelHandle
+			if next, err = s.manager.GetOrCreateTCPTunnel(localPort); err == nil {
+				tunnel.Release()
+				tunnel = next
+				tunnel.Acquire()
+				err = tunnel.Start(ctx)
+			}
+		}
+		if err != nil {
 			cancel()
 			log.Printf("[tcp:%d] Failed to start tunnel: %v", localPort, err)
 			return
@@ -213,4 +228,3 @@ func (s *Server) Shutdown() {
 
 	s.wg.Wait()
 }
-

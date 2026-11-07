@@ -23,6 +23,7 @@ type mockTunnel struct {
 	scheme       string
 	idleDuration time.Duration
 	state        tunnel.State
+	activeConns  int
 }
 
 func newMockTunnel(running bool) *mockTunnel {
@@ -68,6 +69,16 @@ func (m *mockTunnel) Touch() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.touched = true
+}
+
+func (m *mockTunnel) Acquire() {}
+
+func (m *mockTunnel) Release() {}
+
+func (m *mockTunnel) ActiveConns() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.activeConns
 }
 
 func (m *mockTunnel) IdleDuration() time.Duration {
@@ -185,7 +196,7 @@ func TestGetOrCreateTunnel_RemovesFailedTunnel(t *testing.T) {
 	}
 
 	// Pre-populate k8s client cache to avoid real k8s client creation
-	m.ClientFactory().InjectClient("test", nil, nil)
+	m.ClientFactory().InjectClient(nil, "test", nil, nil)
 
 	// Act
 	result, err := m.GetOrCreateTunnel("test.localhost", "http")
@@ -344,7 +355,7 @@ func TestGetOrCreateTunnel_DynamicRouteResolution(t *testing.T) {
 	}
 
 	// Pre-populate k8s client cache
-	m.ClientFactory().InjectClient("microk8s", nil, nil)
+	m.ClientFactory().InjectClient(nil, "microk8s", nil, nil)
 
 	// Act - use dynamic hostname format
 	_, err := m.GetOrCreateTunnel("nginx-80.svc.default.ns.microk8s.cx.k8s.localhost", "http")
@@ -391,8 +402,8 @@ func TestGetOrCreateTunnel_DynamicContextsAllowlist(t *testing.T) {
 			}
 
 			// A cached client for prod means only the allowlist can refuse it
-			m.ClientFactory().InjectClient("dev", nil, nil)
-			m.ClientFactory().InjectClient("prod", nil, nil)
+			m.ClientFactory().InjectClient(nil, "dev", nil, nil)
+			m.ClientFactory().InjectClient(nil, "prod", nil, nil)
 
 			if _, err := m.GetOrCreateTunnel(allowed, scheme); err != nil {
 				t.Errorf("allowed context: unexpected error: %v", err)
@@ -429,7 +440,7 @@ func TestGetOrCreateTunnel_DynamicContextsIgnoredForStaticRoutes(t *testing.T) {
 		listenAddr string, verbose bool) TunnelHandle {
 		return newMockTunnel(false)
 	}
-	m.ClientFactory().InjectClient("prod", nil, nil)
+	m.ClientFactory().InjectClient(nil, "prod", nil, nil)
 
 	if _, err := m.GetOrCreateTunnel("prod.localhost", "http"); err != nil {
 		t.Errorf("static route refused: %v", err)
@@ -475,7 +486,7 @@ func TestManager_ConcurrentGetOrCreateTunnel(t *testing.T) {
 	m := NewManager(cfg)
 
 	// Pre-populate k8s client cache
-	m.ClientFactory().InjectClient("test", nil, nil)
+	m.ClientFactory().InjectClient(nil, "test", nil, nil)
 
 	// Set up factory
 	m.tunnelFactory = func(hostname string, cfg config.K8sRouteConfig,
@@ -512,6 +523,51 @@ func TestManager_CleanupIdleTunnels_NoTunnels(t *testing.T) {
 
 	if len(m.tunnels) != 0 {
 		t.Errorf("Expected 0 tunnels, got %d", len(m.tunnels))
+	}
+}
+
+func TestCleanupIdleTunnels_KeepsTunnelsWithActiveConnections(t *testing.T) {
+	cfg := testConfig(map[string]config.K8sRouteConfig{})
+	cfg.HTTP.IdleTimeout = 30 * time.Minute
+	m := NewManager(cfg)
+
+	// A long psql session or WebSocket: no new connection for far longer than the timeout
+	httpTunnel := newMockTunnel(true)
+	httpTunnel.idleDuration = 60 * time.Minute
+	httpTunnel.activeConns = 1
+	m.tunnels["busy.localhost"] = httpTunnel
+
+	tcpTunnel := newMockTunnel(true)
+	tcpTunnel.idleDuration = 60 * time.Minute
+	tcpTunnel.activeConns = 1
+	m.tcpTunnels[5432] = tcpTunnel
+
+	m.cleanupIdleTunnels()
+
+	if httpTunnel.wasStopped() {
+		t.Error("HTTP tunnel with an active connection should not be stopped")
+	}
+	if tcpTunnel.wasStopped() {
+		t.Error("TCP tunnel with an active connection should not be stopped")
+	}
+	if _, ok := m.tunnels["busy.localhost"]; !ok {
+		t.Error("HTTP tunnel with an active connection should stay in the map")
+	}
+	if _, ok := m.tcpTunnels[5432]; !ok {
+		t.Error("TCP tunnel with an active connection should stay in the map")
+	}
+
+	// Once the connections end, the idle timeout applies again
+	httpTunnel.activeConns = 0
+	tcpTunnel.activeConns = 0
+
+	m.cleanupIdleTunnels()
+
+	if !httpTunnel.wasStopped() {
+		t.Error("idle HTTP tunnel with no connections should be stopped")
+	}
+	if !tcpTunnel.wasStopped() {
+		t.Error("idle TCP tunnel with no connections should be stopped")
 	}
 }
 

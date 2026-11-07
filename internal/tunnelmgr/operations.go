@@ -78,7 +78,8 @@ func (m *Manager) cleanupIdleHTTPTunnels() {
 	defer m.mu.Unlock()
 
 	for hostname, tun := range m.tunnels {
-		if tun.IdleDuration() <= m.config.HTTP.IdleTimeout {
+		// A tunnel with open connections is in use however long since its last request
+		if tun.IdleDuration() <= m.config.HTTP.IdleTimeout || tun.ActiveConns() > 0 {
 			continue
 		}
 		if tun.IsRunning() {
@@ -106,7 +107,7 @@ func (m *Manager) cleanupIdleTCPTunnels() {
 	}
 
 	for port, tunnel := range m.tcpTunnels {
-		if tunnel.IsRunning() && tunnel.IdleDuration() > tcpIdleTimeout {
+		if tunnel.IsRunning() && tunnel.ActiveConns() == 0 && tunnel.IdleDuration() > tcpIdleTimeout {
 			target := m.config.TCP.K8s.Routes[port]
 			idleDur := tunnel.IdleDuration().Round(time.Second)
 			log.Printf("Tunnel stopped: tcp://localhost:%d -> %s/%s (idle for %v)",

@@ -95,7 +95,7 @@ func TestGetOrCreateTCPTunnel_RemovesFailedTunnel(t *testing.T) {
 	}
 
 	// Pre-populate k8s client cache
-	m.ClientFactory().InjectClient("test", nil, nil)
+	m.ClientFactory().InjectClient([]string{"/fake/kubeconfig"}, "test", nil, nil)
 
 	// Act
 	result, err := m.GetOrCreateTCPTunnel(5432)
@@ -136,7 +136,7 @@ func TestGetOrCreateTCPTunnel_FallsBackToHTTPKubeconfig(t *testing.T) {
 	}
 
 	// Pre-populate k8s client cache
-	m.ClientFactory().InjectClient("test", nil, nil)
+	m.ClientFactory().InjectClient([]string{"/http/kubeconfig"}, "test", nil, nil)
 
 	// Act
 	_, err := m.GetOrCreateTCPTunnel(5432)

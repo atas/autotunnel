@@ -124,7 +124,7 @@ http:
    listen: "127.0.0.1:8989" # Port changes require: brew services restart autotunnel
 
    # Idle timeout before closing tunnels (Go duration format)
-   # After this duration of no traffic, the tunnel will be closed
+   # After this duration with no open connections, the tunnel will be closed
    idle_timeout: 60m
 
    k8s:
@@ -236,7 +236,7 @@ flowchart LR
 3. When a request arrives, it inspects the `Host` header (HTTP) or SNI (TLS)
 4. If no tunnel exists for that host, it creates a port-forward using client-go
 5. It reverse-proxies the request through the tunnel
-6. After an idle timeout (no traffic), it closes the tunnel
+6. After an idle timeout with no open connections, it closes the tunnel
 
 ## Configuration
 
