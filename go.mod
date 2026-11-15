@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/fsnotify/fsnotify v1.10.1
 	golang.org/x/net v0.62.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.37.2
 	k8s.io/apimachinery v0.37.2
