@@ -18,20 +18,20 @@ jobs:
         id: metadata
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
-      - name: Approve and enable auto-merge for Go dependency updates
+      - name: Approve and enable auto-merge for Go and GitHub Actions updates
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
         run: |
-          # go.mod and go.sum have no code owner (see .github/CODEOWNERS), so
-          # this approval is enough for them. Any other file, such as a workflow
-          # in a GitHub Actions bump, still needs a code owner to approve.
-          go_files_only=$(gh pr view "$PR_URL" --json files \
-            --jq '.files | length > 0 and all(.path == "go.mod" or .path == "go.sum")')
+          # go.mod, go.sum and the workflows have no code owner (see
+          # .github/CODEOWNERS), so this approval is enough for a Go or a
+          # GitHub Actions bump. Any other file still needs a code owner.
+          bump_files_only=$(gh pr view "$PR_URL" --json files \
+            --jq '.files | length > 0 and all(.path == "go.mod" or .path == "go.sum" or (.path | startswith(".github/workflows/")))')
 
-          if [ "$go_files_only" != "true" ]; then
-            echo "PR changes files other than go.mod/go.sum; leaving it for manual review."
+          if [ "$bump_files_only" != "true" ]; then
+            echo "PR changes files other than go.mod, go.sum and workflows; leaving it for manual review."
             exit 0
           fi
 
